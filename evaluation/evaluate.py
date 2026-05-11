@@ -5,6 +5,7 @@ import pandas as pd
 from data.tokenizer import Tokenizer
 from data.dataloader import build_dataloader
 from selective_attention.models import CausalLM, CausalLMConfig
+from selective_attention.inference import GenerationConfig
 import config
 from evaluation.metrics import compute_bleu
 
@@ -34,7 +35,15 @@ def _generate_preds_causal_lm():
         gen_input_ids = batch["input_ids"].to("cuda")
         target_ids = batch["target_ids"]
 
-        seq_ids = model.generate(gen_input_ids, config.MAX_NEW_TOKENS).cpu()
+        seq_ids = model.generate(
+            gen_input_ids, GenerationConfig(
+                attn_gate_threshold=config.GATE_THRESHOLD,
+                bos_token_id=tokenizer.bos_id,
+                eos_token_id=tokenizer.eos_id,
+                pad_token_id=tokenizer.pad_id,
+                max_new_tokens=config.MAX_NEW_TOKENS
+            )
+        ).cpu()
         input_ids = gen_input_ids.cpu()
 
         for input, pred, tgt in zip(input_ids, seq_ids, target_ids):
