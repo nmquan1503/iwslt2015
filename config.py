@@ -1,0 +1,38 @@
+# Dataset config
+TRAIN_SRC_PATH = ""
+TRAIN_TGT_PATH = ""
+DEV_SRC_PATH = ""
+DEV_TGT_PATH = ""
+TEST_SRC_PATH = ""
+TEST_TGT_PATH = ""
+
+# Tokenizer config
+VOCAB_SIZE = 32000
+SPM_MODEL_PATH = ""
+PAD_ID = 0
+UNK_ID = 1
+BOS_ID = 2
+EOS_ID = 3
+
+# Training config
+BATCH_SIZE = 32
+NUM_EPOCHS = 10
+LAST_CHECKPOINT_PATH = "last_checkpoint.pt"
+BEST_MODEL_PATH = "best_model.pt"
+LEARNING_RATE = 3e-4
+RESUME_TRAINING = False
+
+# Model Config
+TYPE="seq2seq"
+MODEL_DIM = 256
+HEAD_DIM = 8
+SSM_STATE_DIM = 16
+SSM_CONV_KERNEL_SIZE = 4
+SSM_NUM_GROUPS = 1
+SSM_CHUNK_SIZE = 256
+MLCONV_RADIUS = 2
+NUM_LAYERS = 4
+
+# Infer config
+MAX_NEW_TOKENS = 150
+PREDS_PATH = "preds.csv"
