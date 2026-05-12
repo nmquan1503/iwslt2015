@@ -9,7 +9,7 @@ import config
 
 def train():
     tokenizer = Tokenizer()
-    train_loader =build_dataloader(tokenizer, mode="train")
+    train_loader = build_dataloader(tokenizer, mode="train")
     dev_loader = build_dataloader(tokenizer, mode="dev")
     model = CausalLM(CausalLMConfig(
         vocab_size=config.VOCAB_SIZE,
