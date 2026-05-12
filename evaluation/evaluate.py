@@ -23,7 +23,7 @@ def _generate_preds_causal_lm():
         ssm_chunk_size=config.SSM_CHUNK_SIZE,
         mlconv_radius=config.MLCONV_RADIUS,
         num_layers=config.NUM_LAYERS
-    ))
+    )).to(device)
     model.load_state_dict(torch.load(config.BEST_MODEL_PATH, map_location=device))
     model.eval()
 
