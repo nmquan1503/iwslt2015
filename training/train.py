@@ -1,5 +1,6 @@
 import torch
 import argparse
+import os
 
 from selective_attention.models import CausalLM, CausalLMConfig
 from data.tokenizer import Tokenizer
@@ -21,7 +22,9 @@ def train():
         ssm_chunk_size=config.SSM_CHUNK_SIZE,
         mlconv_radius=config.MLCONV_RADIUS,
         num_layers=config.NUM_LAYERS
-    ))
+    )).to("cuda")
+    if os.path.exists(config.BASE_MODEL_PATH):
+        model.load_state_dict(torch.load(config.BASE_MODEL_PATH, map_location="cuda"))
 
     total_params = sum(p.numel() for p in model.parameters())
     print(f"Total params: {total_params:,}")
