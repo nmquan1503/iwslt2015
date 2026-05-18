@@ -37,7 +37,7 @@ def _generate_preds_causal_lm():
 
         seq_ids = model.generate(
             gen_input_ids, GenerationConfig(
-                attn_gate_threshold=config.GATE_THRESHOLD,
+                attn_gate_threshold=config.ATTN_GATE_THRESHOLD,
                 bos_token_id=tokenizer.bos_id,
                 eos_token_id=tokenizer.eos_id,
                 pad_token_id=tokenizer.pad_id,

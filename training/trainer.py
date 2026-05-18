@@ -38,7 +38,7 @@ class Trainer:
             input_ids = batch["fused_input_ids"].to(self.device)
             target_ids = batch["fused_target_ids"].to(self.device)
 
-            logits = self.model(input_ids)
+            logits = self.model(input_ids, attn_gate_threshold=config.ATTN_GATE_THRESHOLD)
 
             loss = self.criterion(logits.view(-1, config.VOCAB_SIZE), target_ids.view(-1))
 
@@ -58,7 +58,7 @@ class Trainer:
             input_ids = batch["fused_input_ids"].to(self.device)
             target_ids = batch["fused_target_ids"].to(self.device)
 
-            logits = self.model(input_ids)
+            logits = self.model(input_ids, attn_gate_threshold=config.ATTN_GATE_THRESHOLD)
             
             loss = self.criterion(logits.view(-1, config.VOCAB_SIZE), target_ids.view(-1))
 
