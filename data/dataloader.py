@@ -6,6 +6,10 @@ from data.tokenizer import Tokenizer
 from data.dataset import CausalLMDataset
 import config
 
+def seed_worker(worker_id):
+    worker_seed = torch.initial_seed() % 2**32
+    torch.manual_seed(worker_seed)
+
 def causal_lm_collate_fn(batch):
     fused_input_ids = [item["fused_input_ids"] for item in batch]
     fused_target_ids = [item["fused_target_ids"] for item in batch]
@@ -31,6 +35,11 @@ def build_dataloader(tokenizer: Tokenizer, mode="train"):
         src_path = config.TEST_SRC_PATH
         tgt_path = config.TEST_TGT_PATH
     dataset = CausalLMDataset(src_path, tgt_path, tokenizer)
+
+    generator = torch.Generator()
+    if config.SEED is not None:
+        generator.manual_seed(config.SEED)
+
     return DataLoader(
         dataset,
         batch_size=config.BATCH_SIZE,
@@ -39,5 +48,7 @@ def build_dataloader(tokenizer: Tokenizer, mode="train"):
         pin_memory=True,
         persistent_workers=True,
         prefetch_factor=4,
-        collate_fn=causal_lm_collate_fn
+        collate_fn=causal_lm_collate_fn,
+        generator=generator,
+        worker_init_fn=seed_worker
     )

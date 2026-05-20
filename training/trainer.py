@@ -38,9 +38,12 @@ class Trainer:
             input_ids = batch["fused_input_ids"].to(self.device)
             target_ids = batch["fused_target_ids"].to(self.device)
 
-            logits = self.model(input_ids, attn_gate_threshold=config.ATTN_GATE_THRESHOLD)
+            logits, gates = self.model(input_ids)
 
             loss = self.criterion(logits.view(-1, config.VOCAB_SIZE), target_ids.view(-1))
+            entropy = -(gates * torch.log(gates + 1e-6) + (1-gates) * torch.log(1-gates + 1e-6))
+            sparse = gates
+            loss = loss + config.LAMBDA_E * entropy.mean() + config.LAMBDA_S * sparse.mean()
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
@@ -58,7 +61,7 @@ class Trainer:
             input_ids = batch["fused_input_ids"].to(self.device)
             target_ids = batch["fused_target_ids"].to(self.device)
 
-            logits = self.model(input_ids, attn_gate_threshold=config.ATTN_GATE_THRESHOLD)
+            logits = self.model(input_ids)
             
             loss = self.criterion(logits.view(-1, config.VOCAB_SIZE), target_ids.view(-1))
 

@@ -9,6 +9,12 @@ from training.trainer import Trainer
 import config
 
 def train():
+    if config.SEED is not None:
+        torch.manual_seed(config.SEED)
+        torch.cuda.manual_seed_all(config.SEED)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+        
     tokenizer = Tokenizer()
     train_loader = build_dataloader(tokenizer, mode="train")
     dev_loader = build_dataloader(tokenizer, mode="dev")
@@ -23,8 +29,6 @@ def train():
         mlconv_radius=config.MLCONV_RADIUS,
         num_layers=config.NUM_LAYERS
     )).to("cuda")
-    if os.path.exists(config.BASE_MODEL_PATH):
-        model.load_state_dict(torch.load(config.BASE_MODEL_PATH, map_location="cuda"))
 
     total_params = sum(p.numel() for p in model.parameters())
     print(f"Total params: {total_params:,}")
