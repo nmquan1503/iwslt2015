@@ -43,10 +43,19 @@ class Trainer:
             logits, gates = self.model(input_ids)
 
             target_loss = self.criterion(logits.view(-1, config.VOCAB_SIZE), target_ids.view(-1))
+            
             entropy = -(gates * torch.log(gates + 1e-6) + (1-gates) * torch.log(1-gates + 1e-6))
-            compress_ratio = gates.mean()
             entropy_loss = entropy.mean()
+            
+            compress_ratio = gates.mean(dim=-1)
+            weights = torch.arange(
+                compress_ratio.size(-1), 
+                device=compress_ratio.device, 
+                dtype=compress_ratio.dtype
+            )
+            weights = 1.0 / (weights + 1.0)
             compress_ratio_loss = (compress_ratio - config.COMPRESS_RATIO) ** 2
+            compress_ratio_loss = (compress_ratio_loss * weights.unsqueeze(0)).mean()
 
             loss = target_loss + config.LAMBDA_E * entropy_loss + config.LAMBDA_M * compress_ratio_loss
 
@@ -80,9 +89,11 @@ class Trainer:
 
             total_loss += loss.item()
         
-        print(f"Dev target loss: {total_loss:.4f}")
+        avg_loss = total_loss / len(self.dev_loader)
 
-        return total_loss / len(self.dev_loader)
+        print(f"Dev target loss: {avg_loss:.4f}")
+
+        return avg_loss
 
     def train(self):
         for epoch in range(self.start_epoch, self.start_epoch + config.NUM_EPOCHS):
