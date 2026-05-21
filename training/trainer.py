@@ -31,7 +31,9 @@ class Trainer:
     
     def _train_one_epoch(self):
         self.model.train()
-        total_loss = 0.0
+        total_target_loss = 0.0
+        total_entropy_loss = 0.0
+        total_compress_ratio_loss = 0.0
         for batch in tqdm(self.train_loader, desc="Train"):
             self.optimizer.zero_grad()
 
@@ -40,18 +42,29 @@ class Trainer:
 
             logits, gates = self.model(input_ids)
 
-            loss = self.criterion(logits.view(-1, config.VOCAB_SIZE), target_ids.view(-1))
+            target_loss = self.criterion(logits.view(-1, config.VOCAB_SIZE), target_ids.view(-1))
             entropy = -(gates * torch.log(gates + 1e-6) + (1-gates) * torch.log(1-gates + 1e-6))
-            sparse = gates
-            loss = loss + config.LAMBDA_E * entropy.mean() + config.LAMBDA_S * sparse.mean()
+            compress_ratio = gates.mean()
+            entropy_loss = entropy.mean()
+            compress_ratio_loss = (compress_ratio - config.COMPRESS_RATIO) ** 2
+
+            loss = target_loss + config.LAMBDA_E * entropy_loss + config.LAMBDA_M * compress_ratio_loss
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
             self.optimizer.step()
 
-            total_loss += loss.item()
+            total_target_loss += target_loss.item()
+            total_entropy_loss += entropy_loss.item()
+            total_compress_ratio_loss += compress_ratio_loss.item()
 
-        return total_loss / len(self.train_loader)
+        avg_target_loss = total_target_loss / len(self.train_loader)
+        avg_entropy_loss = total_entropy_loss / len(self.train_loader)
+        avg_compress_ratio_loss = total_compress_ratio_loss / len(self.train_loader)
+
+        print(f"Train target loss: {avg_target_loss:.4f} | Entropy: {avg_entropy_loss:.4f} | Compress ratio loss: {avg_compress_ratio_loss:.4f}")
+
+        return total_target_loss / len(self.train_loader)
 
     @torch.no_grad()
     def _eval(self):
@@ -67,6 +80,8 @@ class Trainer:
 
             total_loss += loss.item()
         
+        print(f"Dev target loss: {total_loss:.4f}")
+
         return total_loss / len(self.dev_loader)
 
     def train(self):
@@ -77,8 +92,6 @@ class Trainer:
             dev_loss = self._eval()
             self.train_losses.append(train_loss)
             self.dev_losses.append(dev_loss)
-            print(f"Train loss: {train_loss:.4f}")
-            print(f"Dev loss: {dev_loss:.4f}")
 
             if dev_loss < self.best_dev_loss:
                 self.best_dev_loss = dev_loss
