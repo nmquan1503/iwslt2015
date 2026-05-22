@@ -33,7 +33,7 @@ class Trainer:
         self.model.train()
         total_target_loss = 0.0
         total_entropy_loss = 0.0
-        total_compress_ratio_loss = 0.0
+        total_sparsity_loss = 0.0
         for batch in tqdm(self.train_loader, desc="Train"):
             self.optimizer.zero_grad()
 
@@ -47,17 +47,9 @@ class Trainer:
             entropy = -(gates * torch.log(gates + 1e-6) + (1-gates) * torch.log(1-gates + 1e-6))
             entropy_loss = entropy.mean()
             
-            compress_ratio = gates.mean(dim=-1)
-            weights = torch.arange(
-                compress_ratio.size(-1), 
-                device=compress_ratio.device, 
-                dtype=compress_ratio.dtype
-            )
-            weights = 1.0 / (weights + 1.0)
-            compress_ratio_loss = (compress_ratio - config.COMPRESS_RATIO) ** 2
-            compress_ratio_loss = (compress_ratio_loss * weights.unsqueeze(0)).mean()
+            sparsity_loss = (gates ** 2).mean()
 
-            loss = target_loss + config.LAMBDA_E * entropy_loss + config.LAMBDA_M * compress_ratio_loss
+            loss = target_loss + config.LAMBDA_E * entropy_loss + config.LAMBDA_S * sparsity_loss
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
@@ -65,13 +57,13 @@ class Trainer:
 
             total_target_loss += target_loss.item()
             total_entropy_loss += entropy_loss.item()
-            total_compress_ratio_loss += compress_ratio_loss.item()
+            total_sparsity_loss += sparsity_loss.item()
 
         avg_target_loss = total_target_loss / len(self.train_loader)
         avg_entropy_loss = total_entropy_loss / len(self.train_loader)
-        avg_compress_ratio_loss = total_compress_ratio_loss / len(self.train_loader)
+        avg_sparsity_loss = total_sparsity_loss / len(self.train_loader)
 
-        print(f"Train target loss: {avg_target_loss:.4f} | Entropy: {avg_entropy_loss:.4f} | Compress ratio loss: {avg_compress_ratio_loss:.4f}")
+        print(f"Train target loss: {avg_target_loss:.4f} | Entropy: {avg_entropy_loss:.4f} | Sparsity loss: {avg_sparsity_loss:.4f}")
 
         return total_target_loss / len(self.train_loader)
 
