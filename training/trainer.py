@@ -50,16 +50,14 @@ class Trainer:
                 < fused_lengths[:, None]
             )
             seq_mask = seq_mask[:, None, None, :].expand_as(gates)
-            gates = gates.masked_fill(~seq_mask, 0.0)
-            valid_count = (
-                seq_mask.sum()
-                * gates.shape[1]
-                * gates.shape[2]
-            ).clamp(min=1)
+            
+            gates = gates.clamp(1e-6, 1 - 1e-6)
+            entropy = -(gates * torch.log(gates) + (1-gates) * torch.log(1-gates))
+            sparsity = gates**2
+            valid_count = seq_mask.sum().clamp(min=1)
 
-            entropy = -(gates * torch.log(gates + 1e-6) + (1-gates) * torch.log(1-gates + 1e-6))
-            entropy_loss = entropy.sum() / valid_count            
-            sparsity_loss = (gates ** 2).sum() / valid_count
+            entropy_loss = (entropy * seq_mask).sum() / valid_count            
+            sparsity_loss = (sparsity * seq_mask).sum() / valid_count
 
             loss = target_loss + config.LAMBDA_E * entropy_loss + config.LAMBDA_S * sparsity_loss
 
@@ -82,22 +80,43 @@ class Trainer:
     @torch.no_grad()
     def _eval(self):
         self.model.eval()
-        total_loss = 0.0
+        total_target_loss = 0.0
+        total_entropy_loss = 0.0
+        total_sparsity_loss = 0.0
         for batch in tqdm(self.dev_loader, desc="Eval"):
             input_ids = batch["fused_input_ids"].to(self.device)
             target_ids = batch["fused_target_ids"].to(self.device)
+            fused_lengths = batch["fused_lengths"].to(self.device)
 
-            logits = self.model(input_ids)
+            logits, gates = self.model(input_ids)
             
-            loss = self.criterion(logits.view(-1, config.VOCAB_SIZE), target_ids.view(-1))
+            target_loss = self.criterion(logits.view(-1, config.VOCAB_SIZE), target_ids.view(-1))
+            
+            seq_mask = (
+                torch.arange(input_ids.size(1), device=gates.device)[None, :]
+                < fused_lengths[:, None]
+            )
+            seq_mask = seq_mask[:, None, None, :].expand_as(gates)
+            
+            gates = gates.clamp(1e-6, 1 - 1e-6)
+            entropy = -(gates * torch.log(gates) + (1-gates) * torch.log(1-gates))
+            sparsity = gates**2
+            valid_count = seq_mask.sum().clamp(min=1)
 
-            total_loss += loss.item()
+            entropy_loss = (entropy * seq_mask).sum() / valid_count            
+            sparsity_loss = (sparsity * seq_mask).sum() / valid_count
+
+            total_target_loss += target_loss.item()
+            total_entropy_loss += entropy_loss.item()
+            total_sparsity_loss += sparsity_loss.item()
         
-        avg_loss = total_loss / len(self.dev_loader)
+        avg_target_loss = total_target_loss / len(self.dev_loader)
+        avg_entropy_loss = total_entropy_loss / len(self.dev_loader)
+        avg_sparsity_loss = total_sparsity_loss / len(self.dev_loader)
 
-        print(f"Dev target loss: {avg_loss:.4f}")
+        print(f"Dev target loss: {avg_target_loss:.4f} | Entropy: {avg_entropy_loss:.4f} | Sparsity loss: {avg_sparsity_loss:.4f}")
 
-        return avg_loss
+        return avg_target_loss
 
     def train(self):
         for epoch in range(self.start_epoch, self.start_epoch + config.NUM_EPOCHS):
