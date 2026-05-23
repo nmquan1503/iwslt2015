@@ -39,15 +39,27 @@ class Trainer:
 
             input_ids = batch["fused_input_ids"].to(self.device)
             target_ids = batch["fused_target_ids"].to(self.device)
+            fused_lengths = batch["fused_lengths"].to(self.device)
 
             logits, gates = self.model(input_ids)
 
             target_loss = self.criterion(logits.view(-1, config.VOCAB_SIZE), target_ids.view(-1))
             
+            seq_mask = (
+                torch.arange(input_ids.size(1), device=gates.device)[None, :]
+                < fused_lengths[:, None]
+            )
+            seq_mask = seq_mask[:, None, None, :].expand_as(gates)
+            gates = gates.masked_fill(~seq_mask, 0.0)
+            valid_count = (
+                seq_mask.sum()
+                * gates.shape[1]
+                * gates.shape[2]
+            ).clamp(min=1)
+
             entropy = -(gates * torch.log(gates + 1e-6) + (1-gates) * torch.log(1-gates + 1e-6))
-            entropy_loss = entropy.mean()
-            
-            sparsity_loss = (gates ** 2).mean()
+            entropy_loss = entropy.sum() / valid_count            
+            sparsity_loss = (gates ** 2).sum() / valid_count
 
             loss = target_loss + config.LAMBDA_E * entropy_loss + config.LAMBDA_S * sparsity_loss
 
