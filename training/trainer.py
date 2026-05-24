@@ -40,7 +40,8 @@ class Trainer:
             target_ids = batch["fused_target_ids"].to(self.device)
             fused_lengths = batch["fused_lengths"].to(self.device)
 
-            logits, gates = self.model(input_ids)
+            logits, gate_list = self.model(input_ids)
+            gates = torch.stack(gate_list, dim=1)
 
             target_loss = self.criterion(logits.view(-1, config.VOCAB_SIZE), target_ids.view(-1))
             
@@ -51,33 +52,27 @@ class Trainer:
             seq_mask = seq_mask[:, None, None, :].expand_as(gates)
             valid_count = seq_mask.sum().clamp(min=1)
             
-            gate_grad = torch.autograd.grad(
+            gate_grads = torch.autograd.grad(
                 target_loss,
-                gates,
+                gate_list,
                 retain_graph=True,
                 create_graph=False
-            )[0]
-            importance = gate_grad.abs().detach()
-            grad_scale = (
-                (importance * seq_mask).sum()
-                / valid_count
             )
+            importance = torch.stack([
+                grad.abs().detach()
+                for grad in gate_grads
+            ], dim=1)
+            importance = importance * seq_mask
+            grad_scale = importance.sum() / valid_count
             adaptive_lambda_s = (
                 config.LAMBDA_S * grad_scale
             ).detach()
             importance_mean = (
-                (importance * seq_mask).sum(
-                    dim=-1,
-                    keepdim=True
-                ) / seq_mask.sum(
-                    dim=-1,
-                    keepdim=True
-                ).clamp(min=1)
+                importance.sum(dim=-1, keepdim=True) / seq_mask.sum(dim=-1, keepdim=True).clamp(min=1)
             )
 
-            importance = importance / (
-                importance_mean + 1e-6
-            )
+            importance = importance / (importance_mean + 1e-6)
+            importance = importance * seq_mask
 
             gates = gates.clamp(1e-6, 1 - 1e-6)
             sparse_weight = torch.exp(
