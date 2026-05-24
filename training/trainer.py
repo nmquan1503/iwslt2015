@@ -63,26 +63,16 @@ class Trainer:
                 for grad in gate_grads
             ], dim=1)
             importance = importance * seq_mask
-            grad_scale = importance.sum() / valid_count
-            adaptive_lambda_s = (
-                config.LAMBDA_S * grad_scale
-            ).detach()
-            importance_mean = (
-                importance.sum(dim=-1, keepdim=True) / seq_mask.sum(dim=-1, keepdim=True).clamp(min=1)
+            mean_importance = (
+                importance.sum(dim=-1, keepdim=True)
+                / seq_mask.sum(dim=-1, keepdim=True).clamp(min=1)
             )
+            penalty = (mean_importance - importance)
+            penalty = torch.nan_to_num(penalty, nan=0.0)
+            penalty = penalty * seq_mask
+            sparsity_loss = (penalty * gates * seq_mask).sum() / valid_count
 
-            importance = importance / (importance_mean + 1e-6)
-            importance = importance * seq_mask
-
-            gates = gates.clamp(1e-6, 1 - 1e-6)
-            sparse_weight = torch.exp(
-                -config.SPARSITY_ALPHA * importance
-            )
-            sparsity = sparse_weight * gates
-
-            sparsity_loss = (sparsity * seq_mask).sum() / valid_count
-
-            loss = target_loss + adaptive_lambda_s * sparsity_loss
+            loss = target_loss + config.LAMBDA_S * sparsity_loss
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)

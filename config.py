@@ -16,8 +16,7 @@ EOS_ID = 3
 
 # Training config
 SEED = None
-SPARSITY_ALPHA = 2.0
-LAMBDA_S = 2.0
+LAMBDA_S = 1.0
 BATCH_SIZE = 32
 NUM_EPOCHS = 10
 LAST_CHECKPOINT_PATH = "last_checkpoint.pt"
