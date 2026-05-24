@@ -45,35 +45,49 @@ class Trainer:
 
             target_loss = self.criterion(logits.view(-1, config.VOCAB_SIZE), target_ids.view(-1))
             
+            gate_grad = torch.autograd.grad(
+                target_loss,
+                gates,
+                retain_graph=True,
+                create_graph=False
+            )[0]
+            importance = gate_grad.abs().detach()
+            grad_scale = importance.mean()
+            adaptive_lambda_s = (
+                config.LAMBDA_S * grad_scale
+            ).detach()
+            importance = importance / (
+                importance.mean(dim=-1, keepdim=True) + 1e-6
+            )
+
             seq_mask = (
                 torch.arange(input_ids.size(1), device=gates.device)[None, :]
                 < fused_lengths[:, None]
             )
             seq_mask = seq_mask[:, None, None, :].expand_as(gates)
+            valid_count = seq_mask.sum().clamp(min=1)
             
             gates = gates.clamp(1e-6, 1 - 1e-6)
-            entropy = -(gates * torch.log(gates) + (1-gates) * torch.log(1-gates))
-            sparsity = gates**2
-            valid_count = seq_mask.sum().clamp(min=1)
+            sparse_weight = torch.exp(
+                -config.SPARSITY_ALPHA * importance
+            )
+            sparsity = sparse_weight * gates
 
-            entropy_loss = (entropy * seq_mask).sum() / valid_count            
             sparsity_loss = (sparsity * seq_mask).sum() / valid_count
 
-            loss = target_loss + config.LAMBDA_E * entropy_loss + config.LAMBDA_S * sparsity_loss
+            loss = target_loss + adaptive_lambda_s * sparsity_loss
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
             self.optimizer.step()
 
             total_target_loss += target_loss.item()
-            total_entropy_loss += entropy_loss.item()
             total_sparsity_loss += sparsity_loss.item()
 
         avg_target_loss = total_target_loss / len(self.train_loader)
-        avg_entropy_loss = total_entropy_loss / len(self.train_loader)
         avg_sparsity_loss = total_sparsity_loss / len(self.train_loader)
 
-        print(f"Train target loss: {avg_target_loss:.4f} | Entropy: {avg_entropy_loss:.4f} | Sparsity loss: {avg_sparsity_loss:.4f}")
+        print(f"Train target loss: {avg_target_loss:.4f} | Sparsity loss: {avg_sparsity_loss:.4f}")
 
         return total_target_loss / len(self.train_loader)
 
@@ -91,30 +105,12 @@ class Trainer:
             logits, gates = self.model(input_ids)
             
             target_loss = self.criterion(logits.view(-1, config.VOCAB_SIZE), target_ids.view(-1))
-            
-            seq_mask = (
-                torch.arange(input_ids.size(1), device=gates.device)[None, :]
-                < fused_lengths[:, None]
-            )
-            seq_mask = seq_mask[:, None, None, :].expand_as(gates)
-            
-            gates = gates.clamp(1e-6, 1 - 1e-6)
-            entropy = -(gates * torch.log(gates) + (1-gates) * torch.log(1-gates))
-            sparsity = gates**2
-            valid_count = seq_mask.sum().clamp(min=1)
-
-            entropy_loss = (entropy * seq_mask).sum() / valid_count            
-            sparsity_loss = (sparsity * seq_mask).sum() / valid_count
 
             total_target_loss += target_loss.item()
-            total_entropy_loss += entropy_loss.item()
-            total_sparsity_loss += sparsity_loss.item()
         
         avg_target_loss = total_target_loss / len(self.dev_loader)
-        avg_entropy_loss = total_entropy_loss / len(self.dev_loader)
-        avg_sparsity_loss = total_sparsity_loss / len(self.dev_loader)
 
-        print(f"Dev target loss: {avg_target_loss:.4f} | Entropy: {avg_entropy_loss:.4f} | Sparsity loss: {avg_sparsity_loss:.4f}")
+        print(f"Dev target loss: {avg_target_loss:.4f}")
 
         return avg_target_loss
 
