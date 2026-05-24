@@ -32,7 +32,6 @@ class Trainer:
     def _train_one_epoch(self):
         self.model.train()
         total_target_loss = 0.0
-        total_entropy_loss = 0.0
         total_sparsity_loss = 0.0
         for batch in tqdm(self.train_loader, desc="Train"):
             self.optimizer.zero_grad()
@@ -45,21 +44,6 @@ class Trainer:
 
             target_loss = self.criterion(logits.view(-1, config.VOCAB_SIZE), target_ids.view(-1))
             
-            gate_grad = torch.autograd.grad(
-                target_loss,
-                gates,
-                retain_graph=True,
-                create_graph=False
-            )[0]
-            importance = gate_grad.abs().detach()
-            grad_scale = importance.mean()
-            adaptive_lambda_s = (
-                config.LAMBDA_S * grad_scale
-            ).detach()
-            importance = importance / (
-                importance.mean(dim=-1, keepdim=True) + 1e-6
-            )
-
             seq_mask = (
                 torch.arange(input_ids.size(1), device=gates.device)[None, :]
                 < fused_lengths[:, None]
@@ -67,6 +51,34 @@ class Trainer:
             seq_mask = seq_mask[:, None, None, :].expand_as(gates)
             valid_count = seq_mask.sum().clamp(min=1)
             
+            gate_grad = torch.autograd.grad(
+                target_loss,
+                gates,
+                retain_graph=True,
+                create_graph=False
+            )[0]
+            importance = gate_grad.abs().detach()
+            grad_scale = (
+                (importance * seq_mask).sum()
+                / valid_count
+            )
+            adaptive_lambda_s = (
+                config.LAMBDA_S * grad_scale
+            ).detach()
+            importance_mean = (
+                (importance * seq_mask).sum(
+                    dim=-1,
+                    keepdim=True
+                ) / seq_mask.sum(
+                    dim=-1,
+                    keepdim=True
+                ).clamp(min=1)
+            )
+
+            importance = importance / (
+                importance_mean + 1e-6
+            )
+
             gates = gates.clamp(1e-6, 1 - 1e-6)
             sparse_weight = torch.exp(
                 -config.SPARSITY_ALPHA * importance
