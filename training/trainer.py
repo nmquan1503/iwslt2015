@@ -29,10 +29,40 @@ class Trainer:
             self.best_dev_loss = min(self.dev_losses)
             self.start_epoch = len(self.train_losses) + 1
     
+    def _compute_aux_loss(self, hard_gates, attn_weights, valid_masks):
+        total_loss = 0.0
+        total_count = 0
+
+        for hard_gate, attn_weight, valid_mask in zip(hard_gates, attn_weights, valid_masks):
+            gate = hard_gate[:, 0, :, :]                     # (B, L, L)
+            max_attn = attn_weight.max(dim=1).values.detach() # (B, L, L)
+            mask_all = valid_mask[:, 0, :, :].bool()         # (B, L, L)
+            S = mask_all.float().sum(dim=-1, keepdim=True).clamp(min=1)  # (B, L, 1)
+            scaled_attn = S * max_attn                       # (B, L, L)
+            L = gate.shape[-1]
+            diag_mask = torch.eye(L, device=gate.device, dtype=torch.bool).unsqueeze(0)
+            mask_no_diag = mask_all & (~diag_mask)
+            masked_for_max = scaled_attn.masked_fill(~mask_no_diag, float('-inf'))
+            max_per_key = masked_for_max.max(dim=1).values   # (B, L)
+            has_query = mask_no_diag.any(dim=1)              # (B, L)
+            max_per_key = torch.where(has_query, max_per_key, torch.tensor(1.0, device=gate.device))
+            penalty_per_key = torch.relu(1.0 - max_per_key)  # (B, L)
+            penalty_matrix = penalty_per_key.unsqueeze(1)    # (B, 1, L)
+            loss_element = gate * mask_no_diag.float() * penalty_matrix  # (B, L, L)
+            valid_keys = mask_all.any(dim=1).float()         # (B, L)
+            per_key_total = loss_element.sum(dim=1)          # (B, L)
+            sample_loss = (per_key_total * valid_keys).sum(dim=1)  # (B,) 
+            sample_count = valid_keys.sum(dim=1)              # (B,)
+
+            total_loss += sample_loss.sum()
+            total_count += sample_count.sum()
+
+        return total_loss / total_count.clamp(min=1)
+
     def _train_one_epoch(self):
         self.model.train()
         total_target_loss = 0.0
-        total_sparsity_loss = 0.0
+        total_gate_loss = 0.0
         for batch in tqdm(self.train_loader, desc="Train"):
             self.optimizer.zero_grad()
 
@@ -40,51 +70,24 @@ class Trainer:
             target_ids = batch["fused_target_ids"].to(self.device)
             fused_lengths = batch["fused_lengths"].to(self.device)
 
-            logits, gate_list = self.model(input_ids)
-            gates = torch.stack(gate_list, dim=1)
+            logits, hard_gates, attn_weights, valid_masks = self.model(input_ids)
 
             target_loss = self.criterion(logits.view(-1, config.VOCAB_SIZE), target_ids.view(-1))
-            
-            seq_mask = (
-                torch.arange(input_ids.size(1), device=gates.device)[None, :]
-                < fused_lengths[:, None]
-            )
-            seq_mask = seq_mask[:, None, None, :].expand_as(gates)
-            valid_count = seq_mask.sum().clamp(min=1)
-            
-            gate_grads = torch.autograd.grad(
-                target_loss,
-                gate_list,
-                retain_graph=True,
-                create_graph=False
-            )
-            importance = torch.stack([
-                grad.abs().detach()
-                for grad in gate_grads
-            ], dim=1)
-            importance = importance * seq_mask
-            mean_importance = (
-                importance.sum(dim=-1, keepdim=True)
-                / seq_mask.sum(dim=-1, keepdim=True).clamp(min=1)
-            )
-            penalty = (mean_importance - importance)
-            penalty = torch.nan_to_num(penalty, nan=0.0)
-            penalty = penalty * seq_mask
-            sparsity_loss = (penalty * gates * seq_mask).sum() / valid_count
+            gate_loss = self._compute_aux_loss(hard_gates, attn_weights, valid_masks)
 
-            loss = target_loss + config.LAMBDA_S * sparsity_loss
+            loss = target_loss + config.LAMBDA * gate_loss
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
             self.optimizer.step()
 
             total_target_loss += target_loss.item()
-            total_sparsity_loss += sparsity_loss.item()
+            total_gate_loss += gate_loss
 
         avg_target_loss = total_target_loss / len(self.train_loader)
-        avg_sparsity_loss = total_sparsity_loss / len(self.train_loader)
+        avg_gate_loss = total_gate_loss / len(self.train_loader)
 
-        print(f"Train target loss: {avg_target_loss:.4f} | Sparsity loss: {avg_sparsity_loss:.4f}")
+        print(f"Train target loss: {avg_target_loss:.4f} | Gate loss: {avg_gate_loss}")
 
         return total_target_loss / len(self.train_loader)
 
@@ -92,14 +95,12 @@ class Trainer:
     def _eval(self):
         self.model.eval()
         total_target_loss = 0.0
-        total_entropy_loss = 0.0
-        total_sparsity_loss = 0.0
         for batch in tqdm(self.dev_loader, desc="Eval"):
             input_ids = batch["fused_input_ids"].to(self.device)
             target_ids = batch["fused_target_ids"].to(self.device)
             fused_lengths = batch["fused_lengths"].to(self.device)
 
-            logits, gates = self.model(input_ids)
+            logits, _, _, _ = self.model(input_ids)
             
             target_loss = self.criterion(logits.view(-1, config.VOCAB_SIZE), target_ids.view(-1))
 
