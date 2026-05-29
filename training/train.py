@@ -26,7 +26,6 @@ def train():
         ssm_conv_kernel_size=config.SSM_CONV_KERNEL_SIZE,
         ssm_num_groups=config.SSM_NUM_GROUPS,
         ssm_chunk_size=config.SSM_CHUNK_SIZE,
-        attn_conv_kernel_size=config.ATTN_CONV_KERNEL_SIZE,
         num_layers=config.NUM_LAYERS
     )).to("cuda")
 
