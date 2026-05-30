@@ -26,7 +26,8 @@ def train():
         ssm_conv_kernel_size=config.SSM_CONV_KERNEL_SIZE,
         ssm_num_groups=config.SSM_NUM_GROUPS,
         ssm_chunk_size=config.SSM_CHUNK_SIZE,
-        num_layers=config.NUM_LAYERS
+        num_layers=config.NUM_LAYERS,
+        dropout_rate=config.DROPOUT_RATE
     )).to("cuda")
 
     total_params = sum(p.numel() for p in model.parameters())

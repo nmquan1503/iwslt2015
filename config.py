@@ -22,6 +22,7 @@ LAST_CHECKPOINT_PATH = "last_checkpoint.pt"
 BEST_MODEL_PATH = "best_model.pt"
 BASE_MODEL_PATH = "base_model.pt"
 LEARNING_RATE = 3e-4
+DROPOUT_RATE = 0.25
 RESUME_TRAINING = False
 
 # Model Config
@@ -34,7 +35,7 @@ SSM_CHUNK_SIZE = 256
 NUM_LAYERS = 4
 
 # Infer config
-ATTN_GATE_THRESHOLD = 0.3
+ATTN_GATE_THRESHOLDS = [0.0, 0.0, 0.0, 0.0]
 MAX_NEW_TOKENS = 250
 CACHE_UPDATE_INTERVAL = 100
 PREDS_PATH = "preds.csv"
