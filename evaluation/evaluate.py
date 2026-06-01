@@ -33,15 +33,12 @@ def _generate_preds_causal_lm():
         all_preds = []
         all_refs = []
 
-        total_prefill_time = 0.0
-        total_decode_time = 0.0
+        ttft_list = []
+        tps_list = []
 
-        total_prefill_tokens = 0
-        total_decode_tokens = 0
-
+        torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats()
-        prefill_peak_mem = 0
-        decode_peak_mem = 0
+        torch.cuda.synchronize()
 
         for batch in tqdm(test_loader, desc="Test"):
             gen_input_ids = batch["input_ids"].to("cuda")
@@ -71,23 +68,15 @@ def _generate_preds_causal_lm():
                 cache
             )
 
-            torch.cuda.synchronize()
-            t1 = time.time()
-
-            total_prefill_time += (t1 - t0)
-            total_prefill_tokens += lengths.sum().item()
-
-            prefill_peak_mem = max(
-                prefill_peak_mem,
-                torch.cuda.max_memory_allocated()
-            )
-            
             batch_size = gen_input_ids.size(0)
             last_indices = lengths - 1
             logits = logits[torch.arange(batch_size, device=device), last_indices]
 
             torch.cuda.synchronize()
-            t2 = time.time()
+            t1 = time.time()
+
+            ttft = t1 - t0
+            ttft_list.append(ttft)
 
             seq_ids = torch.full(
                 (batch_size, gen_input_ids.size(1) + gen_cfg.max_new_tokens),
@@ -98,6 +87,9 @@ def _generate_preds_causal_lm():
 
             seq_ids[:, :gen_input_ids.size(1)] = gen_input_ids
             finished = torch.zeros(batch_size, dtype=torch.bool, device=device)
+
+            torch.cuda.synchronize()
+            t2 = time.time()
 
             step_count = 0
 
@@ -123,8 +115,11 @@ def _generate_preds_causal_lm():
             torch.cuda.synchronize()
             t3 = time.time()
 
-            total_decode_time += (t3 - t2)
-            total_decode_tokens += step_count * batch_size
+            decode_time = t3 - t2
+            num_tokens = step_count * batch_size
+
+            if decode_time > 0:
+                tps_list.append(num_tokens / decode_time)
 
             input_ids = gen_input_ids.cpu()
             seq_ids = seq_ids.cpu()
@@ -144,11 +139,12 @@ def _generate_preds_causal_lm():
                 all_preds.append(pred_text)
                 all_refs.append(tgt_text)
     
-    prefill_tps = total_prefill_tokens / total_prefill_time
-    decode_tps = total_decode_tokens / total_decode_time
-    total_tps = (total_prefill_tokens + total_decode_tokens) / (total_prefill_time + total_decode_time)
+    avg_ttft = sum(ttft_list) / len(ttft_list)
+    avg_tps = sum(tps_list) / len(tps_list)
 
-    return all_inputs, all_preds, all_refs, prefill_tps, decode_tps, total_tps, prefill_peak_mem, decode_peak_mem
+    peak_memory = torch.cuda.max_memory_allocated()
+
+    return all_inputs, all_preds, all_refs, avg_ttft, avg_tps, peak_memory
 
 def _write_preds(all_inputs, all_preds, all_refs):
     df = pd.DataFrame({
@@ -159,7 +155,7 @@ def _write_preds(all_inputs, all_preds, all_refs):
     df.to_csv(config.PREDS_PATH, index=False)
 
 def evaluate():
-    all_inputs, all_preds, all_refs, prefill_tps, decode_tps, total_tps, prefill_mem, decode_mem = _generate_preds_causal_lm()
+    all_inputs, all_preds, all_refs, avg_ttft, avg_tps, peak_mem = _generate_preds_causal_lm()
     _write_preds(all_inputs, all_preds, all_refs)
 
     results = {}
@@ -172,13 +168,11 @@ def evaluate():
         print(f"{k}: {v:.4f}")
 
     print("\n===== SPEED =====")
-    print(f"Prefill TPS: {prefill_tps:.4f}")
-    print(f"Decode TPS: {decode_tps:.4f}")
-    print(f"Total TPS: {total_tps:.4f}")
+    print(f"Avg TTFT (s): {avg_ttft:.4f}")
+    print(f"Avg TPS     : {avg_tps:.4f}")
 
     print("\n===== MEMORY =====")
-    print(f"Prefill Peak Memory: {prefill_mem / 1024**3:.4f} GB")
-    print(f"Decode Peak Memory: {decode_mem / 1024**3:.4f} GB")
+    print(f"Peak memory: {peak_mem / 1024**3:.4f} GB")
     
 if __name__ == "__main__":
     evaluate()
