@@ -107,11 +107,6 @@ def _generate_preds_causal_lm():
                 logits = model.step(next_token, cache, state, gen_cfg)
                 state.update()
 
-                decode_peak_mem = max(
-                    decode_peak_mem,
-                    torch.cuda.max_memory_allocated()
-                )
-
             torch.cuda.synchronize()
             t3 = time.time()
 
