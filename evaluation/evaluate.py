@@ -27,21 +27,15 @@ def _generate_preds_causal_lm():
     model.load_state_dict(torch.load(config.BEST_MODEL_PATH, map_location=device))
     model.eval()
 
+    all_inputs, all_preds, all_refs = [], [], []
+    ttft_list, tps_list = [], []
+
+    torch.cuda.empty_cache()
+    torch.cuda.reset_peak_memory_stats()
+
     with torch.inference_mode():
-
-        all_inputs = []
-        all_preds = []
-        all_refs = []
-
-        ttft_list = []
-        tps_list = []
-
-        torch.cuda.empty_cache()
-        torch.cuda.reset_peak_memory_stats()
-        torch.cuda.synchronize()
-
         for batch in tqdm(test_loader, desc="Test"):
-            gen_input_ids = batch["input_ids"].to("cuda")
+            input_ids = batch["input_ids"].to(device)
             target_ids = batch["target_ids"]
 
             gen_cfg = GenerationConfig(
@@ -53,53 +47,54 @@ def _generate_preds_causal_lm():
                 cache_update_interval=config.CACHE_UPDATE_INTERVAL
             )
 
+            # ===== cache + state (GIỮ GIỐNG generate) =====
             cache = [CausalBlockCache() for _ in range(config.NUM_LAYERS)]
-
-            lengths = (gen_input_ids != gen_cfg.pad_token_id).sum(dim=1)
+            lengths = (input_ids != gen_cfg.pad_token_id).sum(dim=1)
             state = InferenceState(lengths)
 
+            batch_size, seq_len = input_ids.shape
+            device = input_ids.device
+
+            # ================= PREFILL (TTFT START) =================
             torch.cuda.synchronize()
             t0 = time.time()
 
+            if gen_cfg.attn_gate_thresholds is None:
+                gen_cfg.attn_gate_thresholds = [0.0] * model.cfg.num_layers
+
+            last_indices = lengths - 1
             logits = model.forward(
-                gen_input_ids,
+                input_ids,
                 lengths,
                 gen_cfg.attn_gate_thresholds,
                 cache
             )
-
-            batch_size = gen_input_ids.size(0)
-            last_indices = lengths - 1
             logits = logits[torch.arange(batch_size, device=device), last_indices]
 
             torch.cuda.synchronize()
             t1 = time.time()
 
-            ttft = t1 - t0
-            ttft_list.append(ttft)
+            ttft_list.append(t1 - t0)
 
+            # ================= DECODING =================
             seq_ids = torch.full(
-                (batch_size, gen_input_ids.size(1) + gen_cfg.max_new_tokens),
+                (batch_size, seq_len + gen_cfg.max_new_tokens),
                 fill_value=gen_cfg.pad_token_id,
-                dtype=gen_input_ids.dtype,
+                dtype=input_ids.dtype,
                 device=device
             )
-
-            seq_ids[:, :gen_input_ids.size(1)] = gen_input_ids
+            seq_ids[:, :seq_len] = input_ids
             finished = torch.zeros(batch_size, dtype=torch.bool, device=device)
 
-            torch.cuda.synchronize()
-            t2 = time.time()
+            decode_start = time.time()
 
-            step_count = 0
+            for _ in range(gen_cfg.max_new_tokens):
 
-            for step in range(gen_cfg.max_new_tokens):
-                next_token = torch.argmax(logits, dim=-1)
+                probs = torch.softmax(logits, dim=-1)
+                next_token = torch.argmax(probs, dim=-1)
 
-                seq_ids[:, gen_input_ids.size(1) + step] = next_token
+                seq_ids[:, seq_len + state.step] = next_token
                 finished |= (next_token == gen_cfg.eos_token_id)
-
-                step_count += 1
 
                 if finished.all():
                     break
@@ -108,35 +103,33 @@ def _generate_preds_causal_lm():
                 state.update()
 
             torch.cuda.synchronize()
-            t3 = time.time()
+            decode_end = time.time()
 
-            decode_time = t3 - t2
-            num_tokens = step_count * batch_size
-
+            # ===== TPS =====
+            decode_time = decode_end - decode_start
+            num_tokens = batch_size * gen_cfg.max_new_tokens
             if decode_time > 0:
                 tps_list.append(num_tokens / decode_time)
 
-            input_ids = gen_input_ids.cpu()
+            # ===== EOS TRUNCATE (COPY Y HỆT generate) =====
+            eos_mask = (seq_ids == gen_cfg.eos_token_id)
+            first_eos = eos_mask.float().cumsum(dim=1) >= 1
+            seq_ids = torch.where(first_eos, gen_cfg.eos_token_id, seq_ids)
+
+            # ===== decode =====
             seq_ids = seq_ids.cpu()
+            input_ids = input_ids.cpu()
 
-            for input, pred, tgt in zip(input_ids, seq_ids, target_ids):
-                input = input.tolist()
+            for inp, pred, tgt in zip(input_ids, seq_ids, target_ids):
+                inp = inp.tolist()
                 pred = pred.tolist()
-                start_pred_idx = pred.index(tokenizer.bos_id) if tokenizer.bos_id in pred else -1
-                if start_pred_idx != -1:
-                    pred = pred[start_pred_idx:]
 
-                input_text = tokenizer.decode(input)
-                pred_text = tokenizer.decode(pred)
-                tgt_text = tokenizer.decode(tgt)
+                all_inputs.append(tokenizer.decode(inp))
+                all_preds.append(tokenizer.decode(pred))
+                all_refs.append(tokenizer.decode(tgt))
 
-                all_inputs.append(input_text)
-                all_preds.append(pred_text)
-                all_refs.append(tgt_text)
-    
     avg_ttft = sum(ttft_list) / len(ttft_list)
     avg_tps = sum(tps_list) / len(tps_list)
-
     peak_memory = torch.cuda.max_memory_allocated()
 
     return all_inputs, all_preds, all_refs, avg_ttft, avg_tps, peak_memory
