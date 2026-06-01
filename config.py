@@ -20,7 +20,6 @@ BATCH_SIZE = 32
 NUM_EPOCHS = 10
 LAST_CHECKPOINT_PATH = "last_checkpoint.pt"
 BEST_MODEL_PATH = "best_model.pt"
-BASE_MODEL_PATH = "base_model.pt"
 LEARNING_RATE = 3e-4
 DROPOUT_RATE = 0.25
 RESUME_TRAINING = False

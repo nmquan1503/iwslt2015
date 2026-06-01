@@ -27,121 +27,122 @@ def _generate_preds_causal_lm():
     model.load_state_dict(torch.load(config.BEST_MODEL_PATH, map_location=device))
     model.eval()
 
-    all_inputs = []
-    all_preds = []
-    all_refs = []
+    with torch.inference_mode():
 
-    total_prefill_time = 0.0
-    total_decode_time = 0.0
+        all_inputs = []
+        all_preds = []
+        all_refs = []
 
-    total_prefill_tokens = 0
-    total_decode_tokens = 0
+        total_prefill_time = 0.0
+        total_decode_time = 0.0
 
-    torch.cuda.reset_peak_memory_stats()
-    prefill_peak_mem = 0
-    decode_peak_mem = 0
+        total_prefill_tokens = 0
+        total_decode_tokens = 0
 
-    for batch in tqdm(test_loader, desc="Test"):
-        gen_input_ids = batch["input_ids"].to("cuda")
-        target_ids = batch["target_ids"]
+        torch.cuda.reset_peak_memory_stats()
+        prefill_peak_mem = 0
+        decode_peak_mem = 0
 
-        gen_cfg = GenerationConfig(
-            attn_gate_thresholds=config.ATTN_GATE_THRESHOLDS,
-            bos_token_id=tokenizer.bos_id,
-            eos_token_id=tokenizer.eos_id,
-            pad_token_id=tokenizer.pad_id,
-            max_new_tokens=config.MAX_NEW_TOKENS,
-            cache_update_interval=config.CACHE_UPDATE_INTERVAL
-        )
+        for batch in tqdm(test_loader, desc="Test"):
+            gen_input_ids = batch["input_ids"].to("cuda")
+            target_ids = batch["target_ids"]
 
-        cache = [CausalBlockCache() for _ in range(config.NUM_LAYERS)]
-
-        lengths = (gen_input_ids != gen_cfg.pad_token_id).sum(dim=1)
-        state = InferenceState(lengths)
-
-        torch.cuda.synchronize()
-        t0 = time.time()
-
-        logits = model.forward(
-            gen_input_ids,
-            lengths,
-            gen_cfg.attn_gate_thresholds,
-            cache
-        )
-
-        torch.cuda.synchronize()
-        t1 = time.time()
-
-        total_prefill_time += (t1 - t0)
-        total_prefill_tokens += gen_input_ids.numel()
-
-        prefill_peak_mem = max(
-            prefill_peak_mem,
-            torch.cuda.max_memory_allocated()
-        )
-        
-        batch_size = gen_input_ids.size(0)
-        last_indices = lengths - 1
-        logits = logits[torch.arange(batch_size, device=device), last_indices]
-
-        torch.cuda.synchronize()
-        t2 = time.time()
-
-        seq_ids = torch.full(
-            (batch_size, gen_input_ids.size(1) + gen_cfg.max_new_tokens),
-            fill_value=gen_cfg.pad_token_id,
-            dtype=gen_input_ids.dtype,
-            device=device
-        )
-
-        seq_ids[:, :gen_input_ids.size(1)] = gen_input_ids
-        finished = torch.zeros(batch_size, dtype=torch.bool, device=device)
-
-        step_count = 0
-
-        for step in range(gen_cfg.max_new_tokens):
-            probs = torch.softmax(logits, dim=-1)
-            next_token = torch.argmax(probs, dim=-1)
-
-            seq_ids[:, gen_input_ids.size(1) + step] = next_token
-            finished |= (next_token == gen_cfg.eos_token_id)
-
-            step_count += 1
-
-            if finished.all():
-                break
-
-            logits = model.step(next_token, cache, state, gen_cfg)
-            state.update()
-
-            decode_peak_mem = max(
-                decode_peak_mem,
-                torch.cuda.max_memory_allocated()
+            gen_cfg = GenerationConfig(
+                attn_gate_thresholds=config.ATTN_GATE_THRESHOLDS,
+                bos_token_id=tokenizer.bos_id,
+                eos_token_id=tokenizer.eos_id,
+                pad_token_id=tokenizer.pad_id,
+                max_new_tokens=config.MAX_NEW_TOKENS,
+                cache_update_interval=config.CACHE_UPDATE_INTERVAL
             )
 
-        torch.cuda.synchronize()
-        t3 = time.time()
+            cache = [CausalBlockCache() for _ in range(config.NUM_LAYERS)]
 
-        total_decode_time += (t3 - t2)
-        total_decode_tokens += step_count * batch_size
+            lengths = (gen_input_ids != gen_cfg.pad_token_id).sum(dim=1)
+            state = InferenceState(lengths)
 
-        input_ids = gen_input_ids.cpu()
-        seq_ids = seq_ids.cpu()
+            torch.cuda.synchronize()
+            t0 = time.time()
 
-        for input, pred, tgt in zip(input_ids, seq_ids, target_ids):
-            input = input.tolist()
-            pred = pred.tolist()
-            start_pred_idx = pred.index(tokenizer.bos_id) if tokenizer.bos_id in pred else -1
-            if start_pred_idx != -1:
-                pred = pred[start_pred_idx:]
+            logits = model.forward(
+                gen_input_ids,
+                lengths,
+                gen_cfg.attn_gate_thresholds,
+                cache
+            )
 
-            input_text = tokenizer.decode(input)
-            pred_text = tokenizer.decode(pred)
-            tgt_text = tokenizer.decode(tgt)
+            torch.cuda.synchronize()
+            t1 = time.time()
 
-            all_inputs.append(input_text)
-            all_preds.append(pred_text)
-            all_refs.append(tgt_text)
+            total_prefill_time += (t1 - t0)
+            total_prefill_tokens += lengths.sum().item()
+
+            prefill_peak_mem = max(
+                prefill_peak_mem,
+                torch.cuda.max_memory_allocated()
+            )
+            
+            batch_size = gen_input_ids.size(0)
+            last_indices = lengths - 1
+            logits = logits[torch.arange(batch_size, device=device), last_indices]
+
+            torch.cuda.synchronize()
+            t2 = time.time()
+
+            seq_ids = torch.full(
+                (batch_size, gen_input_ids.size(1) + gen_cfg.max_new_tokens),
+                fill_value=gen_cfg.pad_token_id,
+                dtype=gen_input_ids.dtype,
+                device=device
+            )
+
+            seq_ids[:, :gen_input_ids.size(1)] = gen_input_ids
+            finished = torch.zeros(batch_size, dtype=torch.bool, device=device)
+
+            step_count = 0
+
+            for step in range(gen_cfg.max_new_tokens):
+                next_token = torch.argmax(logits, dim=-1)
+
+                seq_ids[:, gen_input_ids.size(1) + step] = next_token
+                finished |= (next_token == gen_cfg.eos_token_id)
+
+                step_count += 1
+
+                if finished.all():
+                    break
+
+                logits = model.step(next_token, cache, state, gen_cfg)
+                state.update()
+
+                decode_peak_mem = max(
+                    decode_peak_mem,
+                    torch.cuda.max_memory_allocated()
+                )
+
+            torch.cuda.synchronize()
+            t3 = time.time()
+
+            total_decode_time += (t3 - t2)
+            total_decode_tokens += step_count * batch_size
+
+            input_ids = gen_input_ids.cpu()
+            seq_ids = seq_ids.cpu()
+
+            for input, pred, tgt in zip(input_ids, seq_ids, target_ids):
+                input = input.tolist()
+                pred = pred.tolist()
+                start_pred_idx = pred.index(tokenizer.bos_id) if tokenizer.bos_id in pred else -1
+                if start_pred_idx != -1:
+                    pred = pred[start_pred_idx:]
+
+                input_text = tokenizer.decode(input)
+                pred_text = tokenizer.decode(pred)
+                tgt_text = tokenizer.decode(tgt)
+
+                all_inputs.append(input_text)
+                all_preds.append(pred_text)
+                all_refs.append(tgt_text)
     
     prefill_tps = total_prefill_tokens / total_prefill_time
     decode_tps = total_decode_tokens / total_decode_time
