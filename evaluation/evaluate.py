@@ -13,6 +13,7 @@ from evaluation.metrics import compute_bleu, compute_rouge
 def _generate_preds_causal_lm():
     tokenizer = Tokenizer()
     test_loader = build_dataloader(tokenizer, mode="test")
+
     device = "cuda"
     model = CausalLM(CausalLMConfig(
         vocab_size=config.VOCAB_SIZE,
@@ -24,6 +25,7 @@ def _generate_preds_causal_lm():
         ssm_chunk_size=config.SSM_CHUNK_SIZE,
         num_layers=config.NUM_LAYERS
     )).to(device)
+
     model.load_state_dict(torch.load(config.BEST_MODEL_PATH, map_location=device))
     model.eval()
 
@@ -38,6 +40,8 @@ def _generate_preds_causal_lm():
             input_ids = batch["input_ids"].to(device)
             target_ids = batch["target_ids"]
 
+            batch_size, seq_len = input_ids.shape
+
             gen_cfg = GenerationConfig(
                 attn_gate_thresholds=config.ATTN_GATE_THRESHOLDS,
                 bos_token_id=tokenizer.bos_id,
@@ -47,36 +51,30 @@ def _generate_preds_causal_lm():
                 cache_update_interval=config.CACHE_UPDATE_INTERVAL
             )
 
-            # ===== cache + state (GIỮ GIỐNG generate) =====
             cache = [CausalBlockCache() for _ in range(config.NUM_LAYERS)]
             lengths = (input_ids != gen_cfg.pad_token_id).sum(dim=1)
             state = InferenceState(lengths)
 
-            batch_size, seq_len = input_ids.shape
-            device = input_ids.device
-
-            # ================= PREFILL (TTFT START) =================
             torch.cuda.synchronize()
             t0 = time.time()
 
             if gen_cfg.attn_gate_thresholds is None:
                 gen_cfg.attn_gate_thresholds = [0.0] * model.cfg.num_layers
 
-            last_indices = lengths - 1
             logits = model.forward(
                 input_ids,
                 lengths,
                 gen_cfg.attn_gate_thresholds,
                 cache
             )
-            logits = logits[torch.arange(batch_size, device=device), last_indices]
+
+            logits = logits[torch.arange(batch_size, device=device), lengths - 1]
 
             torch.cuda.synchronize()
             t1 = time.time()
 
             ttft_list.append(t1 - t0)
 
-            # ================= DECODING =================
             seq_ids = torch.full(
                 (batch_size, seq_len + gen_cfg.max_new_tokens),
                 fill_value=gen_cfg.pad_token_id,
@@ -89,13 +87,8 @@ def _generate_preds_causal_lm():
             decode_start = time.time()
 
             for _ in range(gen_cfg.max_new_tokens):
-
                 probs = torch.softmax(logits, dim=-1)
                 next_token = torch.argmax(probs, dim=-1)
-                top2_vals, top2_idx = torch.topk(probs, k=2, dim=-1)
-                if torch.any((top2_vals[:, 0] - top2_vals[:, 1]).abs() < 1e-6):
-                    print("⚠️ argmax tie / near-tie detected")
-                    print("gap:", (top2_vals[:, 0] - top2_vals[:, 1]))
 
                 seq_ids[:, seq_len + state.step] = next_token
                 finished |= (next_token == gen_cfg.eos_token_id)
@@ -109,18 +102,16 @@ def _generate_preds_causal_lm():
             torch.cuda.synchronize()
             decode_end = time.time()
 
-            # ===== TPS =====
             decode_time = decode_end - decode_start
-            num_tokens = batch_size * gen_cfg.max_new_tokens
-            if decode_time > 0:
-                tps_list.append(num_tokens / decode_time)
 
-            # ===== EOS TRUNCATE (COPY Y HỆT generate) =====
+            generated_tokens = seq_ids[:, seq_len:].ne(gen_cfg.pad_token_id).sum().item()
+            if decode_time > 0:
+                tps_list.append(generated_tokens / decode_time)
+
             eos_mask = (seq_ids == gen_cfg.eos_token_id)
             first_eos = eos_mask.float().cumsum(dim=1) >= 1
             seq_ids = torch.where(first_eos, gen_cfg.eos_token_id, seq_ids)
 
-            # ===== decode =====
             seq_ids = seq_ids.cpu()
             input_ids = input_ids.cpu()
 
@@ -129,11 +120,9 @@ def _generate_preds_causal_lm():
                 pred = pred.tolist()
 
                 if tokenizer.bos_id in pred:
-                    bos_idx = pred.index(tokenizer.bos_id)
-                    pred = pred[bos_idx + 1:]
+                    pred = pred[pred.index(tokenizer.bos_id) + 1:]
                 if tokenizer.eos_id in pred:
-                    eos_idx = pred.index(tokenizer.eos_id)
-                    pred = pred[:eos_idx]
+                    pred = pred[:pred.index(tokenizer.eos_id)]
 
                 all_inputs.append(tokenizer.decode(inp))
                 all_preds.append(tokenizer.decode(pred))
