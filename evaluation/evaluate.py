@@ -92,6 +92,10 @@ def _generate_preds_causal_lm():
 
                 probs = torch.softmax(logits, dim=-1)
                 next_token = torch.argmax(probs, dim=-1)
+                top2_vals, top2_idx = torch.topk(probs, k=2, dim=-1)
+                if torch.any((top2_vals[:, 0] - top2_vals[:, 1]).abs() < 1e-6):
+                    print("⚠️ argmax tie / near-tie detected")
+                    print("gap:", (top2_vals[:, 0] - top2_vals[:, 1]))
 
                 seq_ids[:, seq_len + state.step] = next_token
                 finished |= (next_token == gen_cfg.eos_token_id)
