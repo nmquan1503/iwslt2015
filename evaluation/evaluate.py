@@ -124,6 +124,13 @@ def _generate_preds_causal_lm():
                 inp = inp.tolist()
                 pred = pred.tolist()
 
+                if tokenizer.bos_id in pred:
+                    bos_idx = pred.index(tokenizer.bos_id)
+                    pred = pred[bos_idx + 1:]
+                if tokenizer.eos_id in pred:
+                    eos_idx = pred.index(tokenizer.eos_id)
+                    pred = pred[:eos_idx]
+
                 all_inputs.append(tokenizer.decode(inp))
                 all_preds.append(tokenizer.decode(pred))
                 all_refs.append(tokenizer.decode(tgt))
