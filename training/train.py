@@ -21,7 +21,7 @@ def train():
     tokenizer = Tokenizer()
     train_loader = build_dataloader(tokenizer, mode="train")
     dev_loader = build_dataloader(tokenizer, mode="dev")
-    
+    device = "cuda"
     if config.MODEL_TYPE == "causal_lm":
         model = CausalLM(CausalLMConfig(
             vocab_size=config.VOCAB_SIZE,
@@ -32,7 +32,8 @@ def train():
             ssm_num_groups=config.SSM_NUM_GROUPS,
             ssm_chunk_size=config.SSM_CHUNK_SIZE,
             num_layers=config.NUM_LAYERS,
-            dropout_rate=config.DROPOUT_RATE
+            dropout_rate=config.DROPOUT_RATE,
+            device=device
         )).to("cuda")
     else:
         model = Seq2SeqLM(Seq2SeqLMConfig(
@@ -44,7 +45,8 @@ def train():
             ssm_num_groups=config.SSM_NUM_GROUPS,
             ssm_chunk_size=config.SSM_CHUNK_SIZE,
             num_layers=config.NUM_LAYERS,
-            dropout_rate=config.DROPOUT_RATE
+            dropout_rate=config.DROPOUT_RATE,
+            device=device
         ))
     model.warmup(config.BATCH_SIZE)
 

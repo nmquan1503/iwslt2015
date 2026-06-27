@@ -28,8 +28,10 @@ def _generate_preds_causal_lm():
             ssm_num_groups=config.SSM_NUM_GROUPS,
             ssm_chunk_size=config.SSM_CHUNK_SIZE,
             num_layers=config.NUM_LAYERS,
+            device=device
         )
     ).to(device)
+    model.warmup(config.BATCH_SIZE)
 
     model.load_state_dict(
         torch.load(
@@ -97,8 +99,10 @@ def _generate_preds_seq2seq():
             ssm_num_groups=config.SSM_NUM_GROUPS,
             ssm_chunk_size=config.SSM_CHUNK_SIZE,
             num_layers=config.NUM_LAYERS,
+            device=device
         )
     ).to(device)
+    model.warmup(config.BATCH_SIZE)
 
     model.load_state_dict(
         torch.load(
@@ -166,7 +170,7 @@ def _write_preds(all_inputs, all_preds, all_refs):
         "prediction": all_preds,
     })
     df.to_csv(config.PREDS_PATH, index=False)
-    
+
 def evaluate():
     if config.MODEL_TYPE == "causal_lm":
         all_inputs, all_preds, all_refs, peak_mem = _generate_preds_causal_lm()
