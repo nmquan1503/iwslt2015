@@ -29,6 +29,28 @@ class Trainer:
             self.best_dev_loss = min(self.dev_losses)
             self.start_epoch = len(self.train_losses) + 1
 
+    def train(self):
+        for epoch in range(self.start_epoch, self.start_epoch + config.NUM_EPOCHS):
+            print("=" * 10 + f" Epoch {epoch} " + "=" * 10)
+            
+            train_loss = self._train_one_epoch()
+            dev_loss = self._eval()
+            self.train_losses.append(train_loss)
+            self.dev_losses.append(dev_loss)
+
+            if dev_loss < self.best_dev_loss:
+                self.best_dev_loss = dev_loss
+                torch.save(self.model.state_dict(), config.BEST_MODEL_PATH)
+                print(">>> Save best model")
+            
+            torch.save({
+                "model": self.model.state_dict(),
+                "optimizer": self.optimizer.state_dict(),
+                "train_losses": self.train_losses,
+                "dev_losses": self.dev_losses
+            }, config.LAST_CHECKPOINT_PATH)
+
+class CausalLMTrainer(Trainer):
     def _train_one_epoch(self):
         self.model.train()
         total_loss = 0.0
@@ -76,23 +98,71 @@ class Trainer:
 
         return avg_loss
 
-    def train(self):
-        for epoch in range(self.start_epoch, self.start_epoch + config.NUM_EPOCHS):
-            print("=" * 10 + f" Epoch {epoch} " + "=" * 10)
-            
-            train_loss = self._train_one_epoch()
-            dev_loss = self._eval()
-            self.train_losses.append(train_loss)
-            self.dev_losses.append(dev_loss)
+class Seq2SeqTrainer(Trainer):
+    def _train_one_epoch(self):
+        self.model.train()
+        total_loss = 0.0
 
-            if dev_loss < self.best_dev_loss:
-                self.best_dev_loss = dev_loss
-                torch.save(self.model.state_dict(), config.BEST_MODEL_PATH)
-                print(">>> Save best model")
-            
-            torch.save({
-                "model": self.model.state_dict(),
-                "optimizer": self.optimizer.state_dict(),
-                "train_losses": self.train_losses,
-                "dev_losses": self.dev_losses
-            }, config.LAST_CHECKPOINT_PATH)
+        for batch in tqdm(self.train_loader, desc="Train"):
+            self.optimizer.zero_grad()
+
+            encoder_input_ids = batch["encoder_input_ids"].to(self.device)
+            encoder_input_lengths = batch["encoder_input_lengths"].to(self.device)
+            decoder_input_ids = batch["decoder_input_ids"].to(self.device)
+            target_ids = batch["target_ids"].to(self.device)
+
+            logits = self.model(
+                input_ids=encoder_input_ids,
+                lengths=encoder_input_lengths,
+                decoder_input_ids=decoder_input_ids,
+            )
+
+            loss = self.criterion(
+                logits.view(-1, config.VOCAB_SIZE),
+                target_ids.view(-1),
+            )
+
+            total_loss += loss.item()
+
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(
+                self.model.parameters(),
+                1.0,
+            )
+            self.optimizer.step()
+
+        avg_loss = total_loss / len(self.train_loader)
+
+        print(f"Train loss: {avg_loss:.4f}")
+
+        return avg_loss
+
+    @torch.no_grad()
+    def _eval(self):
+        self.model.eval()
+        total_loss = 0.0
+
+        for batch in tqdm(self.dev_loader, desc="Eval"):
+            encoder_input_ids = batch["encoder_input_ids"].to(self.device)
+            encoder_input_lengths = batch["encoder_input_lengths"].to(self.device)
+            decoder_input_ids = batch["decoder_input_ids"].to(self.device)
+            target_ids = batch["target_ids"].to(self.device)
+
+            logits = self.model(
+                input_ids=encoder_input_ids,
+                lengths=encoder_input_lengths,
+                decoder_input_ids=decoder_input_ids,
+            )
+
+            loss = self.criterion(
+                logits.view(-1, config.VOCAB_SIZE),
+                target_ids.view(-1),
+            )
+
+            total_loss += loss.item()
+
+        avg_loss = total_loss / len(self.dev_loader)
+
+        print(f"Dev loss: {avg_loss:.4f}")
+
+        return avg_loss

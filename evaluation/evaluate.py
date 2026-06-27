@@ -5,8 +5,11 @@ import time
 
 from data.tokenizer import Tokenizer
 from data.dataloader import build_dataloader
-from selective_attention.models import CausalLM, CausalLMConfig
-from selective_attention.inference import GenerationConfig, CausalBlockCache, InferenceState
+from selective_attention.models import (
+    CausalLM, CausalLMConfig,
+    Seq2SeqLM, Seq2SeqLMConfig
+)
+from selective_attention.inference import GenerationConfig
 import config
 from evaluation.metrics import compute_bleu, compute_rouge
 
@@ -15,22 +18,37 @@ def _generate_preds_causal_lm():
     test_loader = build_dataloader(tokenizer, mode="test")
 
     device = "cuda"
-    model = CausalLM(CausalLMConfig(
-        vocab_size=config.VOCAB_SIZE,
-        model_dim=config.MODEL_DIM,
-        head_dim=config.HEAD_DIM,
-        ssm_state_dim=config.SSM_STATE_DIM,
-        ssm_conv_kernel_size=config.SSM_CONV_KERNEL_SIZE,
-        ssm_num_groups=config.SSM_NUM_GROUPS,
-        ssm_chunk_size=config.SSM_CHUNK_SIZE,
-        num_layers=config.NUM_LAYERS
-    )).to(device)
+    model = CausalLM(
+        CausalLMConfig(
+            vocab_size=config.VOCAB_SIZE,
+            model_dim=config.MODEL_DIM,
+            head_dim=config.HEAD_DIM,
+            ssm_state_dim=config.SSM_STATE_DIM,
+            ssm_conv_kernel_size=config.SSM_CONV_KERNEL_SIZE,
+            ssm_num_groups=config.SSM_NUM_GROUPS,
+            ssm_chunk_size=config.SSM_CHUNK_SIZE,
+            num_layers=config.NUM_LAYERS,
+        )
+    ).to(device)
 
-    model.load_state_dict(torch.load(config.BEST_MODEL_PATH, map_location=device))
+    model.load_state_dict(
+        torch.load(
+            config.BEST_MODEL_PATH,
+            map_location=device,
+        )
+    )
     model.eval()
 
+    gen_cfg = GenerationConfig(
+        attn_gate_thresholds=config.ATTN_GATE_THRESHOLDS,
+        bos_token_id=tokenizer.bos_id,
+        eos_token_id=tokenizer.eos_id,
+        pad_token_id=tokenizer.pad_id,
+        max_new_tokens=config.MAX_NEW_TOKENS,
+        cache_update_interval=config.CACHE_UPDATE_INTERVAL,
+    )
+
     all_inputs, all_preds, all_refs = [], [], []
-    ttft_list, tps_list = [], []
 
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
@@ -38,101 +56,108 @@ def _generate_preds_causal_lm():
     with torch.inference_mode():
         for batch in tqdm(test_loader, desc="Test"):
             input_ids = batch["input_ids"].to(device)
-            target_ids = batch["target_ids"]
+            pred_ids = model.generate(input_ids, gen_cfg).cpu()
 
-            batch_size, seq_len = input_ids.shape
-
-            gen_cfg = GenerationConfig(
-                attn_gate_thresholds=config.ATTN_GATE_THRESHOLDS,
-                bos_token_id=tokenizer.bos_id,
-                eos_token_id=tokenizer.eos_id,
-                pad_token_id=tokenizer.pad_id,
-                max_new_tokens=config.MAX_NEW_TOKENS,
-                cache_update_interval=config.CACHE_UPDATE_INTERVAL
-            )
-
-            cache = [CausalBlockCache() for _ in range(config.NUM_LAYERS)]
-            lengths = (input_ids != gen_cfg.pad_token_id).sum(dim=1)
-            state = InferenceState(lengths)
-
-            torch.cuda.synchronize()
-            t0 = time.time()
-
-            if gen_cfg.attn_gate_thresholds is None:
-                gen_cfg.attn_gate_thresholds = [0.0] * model.cfg.num_layers
-
-            logits = model.forward(
-                input_ids,
-                lengths,
-                gen_cfg.attn_gate_thresholds,
-                cache
-            )
-
-            logits = logits[torch.arange(batch_size, device=device), lengths - 1]
-
-            torch.cuda.synchronize()
-            t1 = time.time()
-
-            ttft_list.append(t1 - t0)
-
-            seq_ids = torch.full(
-                (batch_size, seq_len + gen_cfg.max_new_tokens),
-                fill_value=gen_cfg.pad_token_id,
-                dtype=input_ids.dtype,
-                device=device
-            )
-            seq_ids[:, :seq_len] = input_ids
-            finished = torch.zeros(batch_size, dtype=torch.bool, device=device)
-
-            decode_start = time.time()
-
-            for _ in range(gen_cfg.max_new_tokens):
-                probs = torch.softmax(logits, dim=-1)
-                next_token = torch.argmax(probs, dim=-1)
-
-                seq_ids[:, seq_len + state.step] = next_token
-                finished |= (next_token == gen_cfg.eos_token_id)
-
-                if finished.all():
-                    break
-
-                logits = model.step(next_token, cache, state, gen_cfg)
-                state.update()
-
-            torch.cuda.synchronize()
-            decode_end = time.time()
-
-            decode_time = decode_end - decode_start
-
-            generated_tokens = seq_ids[:, seq_len:].ne(gen_cfg.pad_token_id).sum().item()
-            if decode_time > 0:
-                tps_list.append(generated_tokens / decode_time)
-
-            eos_mask = (seq_ids == gen_cfg.eos_token_id)
-            first_eos = eos_mask.float().cumsum(dim=1) >= 1
-            seq_ids = torch.where(first_eos, gen_cfg.eos_token_id, seq_ids)
-
-            seq_ids = seq_ids.cpu()
-            input_ids = input_ids.cpu()
-
-            for inp, pred, tgt in zip(input_ids, seq_ids, target_ids):
-                inp = inp.tolist()
+            for inp, pred, tgt in zip(
+                input_ids.cpu(),
+                pred_ids,
+                batch["target_ids"],
+            ):
                 pred = pred.tolist()
 
                 if tokenizer.bos_id in pred:
                     pred = pred[pred.index(tokenizer.bos_id) + 1:]
+
                 if tokenizer.eos_id in pred:
                     pred = pred[:pred.index(tokenizer.eos_id)]
 
-                all_inputs.append(tokenizer.decode(inp))
+                all_inputs.append(tokenizer.decode(inp.tolist()))
                 all_preds.append(tokenizer.decode(pred))
                 all_refs.append(tokenizer.decode(tgt))
 
-    avg_ttft = sum(ttft_list) / len(ttft_list)
-    avg_tps = sum(tps_list) / len(tps_list)
-    peak_memory = torch.cuda.max_memory_allocated()
+    return (
+        all_inputs,
+        all_preds,
+        all_refs,
+        torch.cuda.max_memory_allocated(),
+    )
 
-    return all_inputs, all_preds, all_refs, avg_ttft, avg_tps, peak_memory
+def _generate_preds_seq2seq():
+    tokenizer = Tokenizer()
+    test_loader = build_dataloader(tokenizer, mode="test")
+
+    device = "cuda"
+    model = Seq2SeqLM(
+        Seq2SeqLMConfig(
+            vocab_size=config.VOCAB_SIZE,
+            model_dim=config.MODEL_DIM,
+            head_dim=config.HEAD_DIM,
+            ssm_state_dim=config.SSM_STATE_DIM,
+            ssm_conv_kernel_size=config.SSM_CONV_KERNEL_SIZE,
+            ssm_num_groups=config.SSM_NUM_GROUPS,
+            ssm_chunk_size=config.SSM_CHUNK_SIZE,
+            num_layers=config.NUM_LAYERS,
+        )
+    ).to(device)
+
+    model.load_state_dict(
+        torch.load(
+            config.BEST_MODEL_PATH,
+            map_location=device,
+        )
+    )
+    model.eval()
+
+    gen_cfg = GenerationConfig(
+        bos_token_id=tokenizer.bos_id,
+        eos_token_id=tokenizer.eos_id,
+        pad_token_id=tokenizer.pad_id,
+        max_new_tokens=config.MAX_NEW_TOKENS,
+        cache_update_interval=config.CACHE_UPDATE_INTERVAL,
+        enc_attn_gate_thresholds=config.ENC_ATTN_GATE_THRESHOLDS,
+        attn_gate_thresholds=config.ATTN_GATE_THRESHOLDS,
+        cross_attn_gate_thresholds=config.CROSS_ATTN_GATE_THRESHOLDS
+    )
+
+    all_inputs, all_preds, all_refs = [], [], []
+
+    torch.cuda.empty_cache()
+    torch.cuda.reset_peak_memory_stats()
+
+    with torch.inference_mode():
+        for batch in tqdm(test_loader, desc="Test"):
+            input_ids = batch["encoder_input_ids"].to(device)
+            target_ids = batch["target_ids"].to(device)
+
+            pred_ids = model.generate(
+                input_ids=input_ids,
+                gen_cfg=gen_cfg,
+            ).cpu()
+
+            for inp, pred, tgt in zip(
+                input_ids.cpu(),
+                pred_ids,
+                target_ids,
+            ):
+                pred = pred.tolist()
+                tgt = tgt.tolist()
+
+                if tokenizer.bos_id in pred:
+                    pred = pred[pred.index(tokenizer.bos_id) + 1:]
+
+                if tokenizer.eos_id in pred:
+                    pred = pred[:pred.index(tokenizer.eos_id)]
+
+                all_inputs.append(tokenizer.decode(inp.tolist()))
+                all_preds.append(tokenizer.decode(pred))
+                all_refs.append(tokenizer.decode(tgt))
+
+    return (
+        all_inputs,
+        all_preds,
+        all_refs,
+        torch.cuda.max_memory_allocated(),
+    )
 
 def _write_preds(all_inputs, all_preds, all_refs):
     df = pd.DataFrame({
@@ -141,23 +166,25 @@ def _write_preds(all_inputs, all_preds, all_refs):
         "prediction": all_preds,
     })
     df.to_csv(config.PREDS_PATH, index=False)
-
+    
 def evaluate():
-    all_inputs, all_preds, all_refs, avg_ttft, avg_tps, peak_mem = _generate_preds_causal_lm()
+    if config.MODEL_TYPE == "causal_lm":
+        all_inputs, all_preds, all_refs, peak_mem = _generate_preds_causal_lm()
+    elif config.MODEL_TYPE == "seq2seq":
+        all_inputs, all_preds, all_refs, peak_mem = _generate_preds_seq2seq()
+    else:
+        raise ValueError(f"Don't support {config.MODEL_TYPE}")
+
     _write_preds(all_inputs, all_preds, all_refs)
 
-    results = {}
-
-    results.update(compute_bleu(all_preds, all_refs))
-    results.update(compute_rouge(all_preds, all_refs))
+    metrics = {
+        **compute_bleu(all_preds, all_refs),
+        **compute_rouge(all_preds, all_refs),
+    }
 
     print("\n===== QUALITY =====")
-    for k, v in results.items():
+    for k, v in metrics.items():
         print(f"{k}: {v:.4f}")
-
-    print("\n===== SPEED =====")
-    print(f"Avg TTFT (s): {avg_ttft:.4f}")
-    print(f"Avg TPS     : {avg_tps:.4f}")
 
     print("\n===== MEMORY =====")
     print(f"Peak memory: {peak_mem / 1024**3:.4f} GB")

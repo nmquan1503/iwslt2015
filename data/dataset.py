@@ -4,152 +4,65 @@ import pandas as pd
 import re
 
 from data.tokenizer import Tokenizer
+import config
 
 class CausalLMDataset(Dataset):
     MAX_LEN = 500
 
     def __init__(self, src_path: str, tgt_path: str, tokenizer: Tokenizer):
         self.tokenizer = tokenizer
-
-        with open(src_path, "r") as f:
-            src_texts = f.readlines()
-
-        with open(tgt_path, "r") as f:
-            tgt_texts = f.readlines()
-
-        assert len(src_texts) == len(tgt_texts)
-
         self.src_ids = []
         self.tgt_ids = []
 
-        dropped = 0
-        split_added = 0
+        with open(src_path) as f:
+            src_texts = [x.strip() for x in f]
+
+        with open(tgt_path) as f:
+            tgt_texts = [x.strip() for x in f]
+
+        assert len(src_texts) == len(tgt_texts)
+
+        enc_src = lambda x: tokenizer.encode([x], add_bos=False, add_eos=False)[0]
+        enc_tgt = lambda x: tokenizer.encode([x], add_bos=True, add_eos=True)[0]
 
         for src_text, tgt_text in zip(src_texts, tgt_texts):
-            src_text = src_text.strip()
-            tgt_text = tgt_text.strip()
+            src_ids = enc_src(src_text)
+            tgt_ids = enc_tgt(tgt_text)
 
-            src_ids = tokenizer.encode(
-                [src_text],
-                add_bos=False,
-                add_eos=False
-            )[0]
-
-            tgt_ids = tokenizer.encode(
-                [tgt_text],
-                add_bos=True,
-                add_eos=True
-            )[0]
-
-            fused_len = len(src_ids) + len(tgt_ids) - 1
-
-            # =========================
-            # Normal sample
-            # =========================
-
-            if fused_len <= self.MAX_LEN:
+            if len(src_ids) + len(tgt_ids) - 1 <= self.MAX_LEN:
                 self.src_ids.append(src_ids)
                 self.tgt_ids.append(tgt_ids)
                 continue
 
-            # =========================
-            # Try split by punctuation
-            # =========================
-
             src_sents = self._split_sentences(src_text)
             tgt_sents = self._split_sentences(tgt_text)
 
-            # sentence count mismatch -> drop
             if len(src_sents) != len(tgt_sents):
-                dropped += 1
                 continue
 
-            current_src = []
-            current_tgt = []
+            cur_src, cur_tgt = [], []
 
             for s_src, s_tgt in zip(src_sents, tgt_sents):
-                trial_src = " ".join(current_src + [s_src])
-                trial_tgt = " ".join(current_tgt + [s_tgt])
+                trial_src = cur_src + [s_src]
+                trial_tgt = cur_tgt + [s_tgt]
 
-                trial_src_ids = tokenizer.encode(
-                    [trial_src],
-                    add_bos=False,
-                    add_eos=False
-                )[0]
+                if len(enc_src(" ".join(trial_src))) + len(enc_tgt(" ".join(trial_tgt))) - 1 <= self.MAX_LEN:
+                    cur_src, cur_tgt = trial_src, trial_tgt
+                    continue
 
-                trial_tgt_ids = tokenizer.encode(
-                    [trial_tgt],
-                    add_bos=True,
-                    add_eos=True
-                )[0]
+                if cur_src:
+                    self.src_ids.append(enc_src(" ".join(cur_src)))
+                    self.tgt_ids.append(enc_tgt(" ".join(cur_tgt)))
 
-                trial_len = len(trial_src_ids) + len(trial_tgt_ids) - 1
+                cur_src, cur_tgt = [s_src], [s_tgt]
 
-                # still safe -> keep accumulating
-                if trial_len <= self.MAX_LEN:
-                    current_src.append(s_src)
-                    current_tgt.append(s_tgt)
+            if cur_src:
+                src_ids = enc_src(" ".join(cur_src))
+                tgt_ids = enc_tgt(" ".join(cur_tgt))
 
-                else:
-                    # flush current chunk
-                    if len(current_src) > 0:
-                        final_src = " ".join(current_src)
-                        final_tgt = " ".join(current_tgt)
-
-                        self.src_ids.append(
-                            tokenizer.encode(
-                                [final_src],
-                                add_bos=False,
-                                add_eos=False
-                            )[0]
-                        )
-
-                        self.tgt_ids.append(
-                            tokenizer.encode(
-                                [final_tgt],
-                                add_bos=True,
-                                add_eos=True
-                            )[0]
-                        )
-
-                        split_added += 1
-
-                    # start new chunk
-                    current_src = [s_src]
-                    current_tgt = [s_tgt]
-
-            # flush remaining
-            if len(current_src) > 0:
-                final_src = " ".join(current_src)
-                final_tgt = " ".join(current_tgt)
-
-                final_src_ids = tokenizer.encode(
-                    [final_src],
-                    add_bos=False,
-                    add_eos=False
-                )[0]
-
-                final_tgt_ids = tokenizer.encode(
-                    [final_tgt],
-                    add_bos=True,
-                    add_eos=True
-                )[0]
-
-                final_len = len(final_src_ids) + len(final_tgt_ids) - 1
-
-                # if even split chunk still too long -> drop
-                if final_len <= self.MAX_LEN:
-                    self.src_ids.append(final_src_ids)
-                    self.tgt_ids.append(final_tgt_ids)
-                    split_added += 1
-                else:
-                    dropped += 1
-
-        print("=" * 50)
-        print(f"Final samples : {len(self.src_ids)}")
-        print(f"Split added   : {split_added}")
-        print(f"Dropped       : {dropped}")
-        print("=" * 50)
+                if len(src_ids) + len(tgt_ids) - 1 <= self.MAX_LEN:
+                    self.src_ids.append(src_ids)
+                    self.tgt_ids.append(tgt_ids)
 
     def _split_sentences(self, text):
         text = text.strip()
@@ -176,3 +89,93 @@ class CausalLMDataset(Dataset):
             "input_ids": torch.tensor(src + tgt[:1], dtype=torch.long),
             "target_ids": tgt
         }
+
+
+class Seq2SeqDataset(Dataset):
+    MAX_LEN = 250
+
+    def __init__(self, src_path: str, tgt_path: str, tokenizer: Tokenizer):
+        self.tokenizer = tokenizer
+        self.src_ids = []
+        self.tgt_ids = []
+
+        with open(src_path) as f:
+            src_texts = [x.strip() for x in f]
+
+        with open(tgt_path) as f:
+            tgt_texts = [x.strip() for x in f]
+
+        assert len(src_texts) == len(tgt_texts)
+
+        enc_src = lambda x: tokenizer.encode([x], add_bos=False, add_eos=False)[0]
+        enc_tgt = lambda x: tokenizer.encode([x], add_bos=True, add_eos=True)[0]
+
+        for src_text, tgt_text in zip(src_texts, tgt_texts):
+            src_ids = enc_src(src_text)
+            tgt_ids = enc_tgt(tgt_text)
+
+            if max(len(src_ids), len(tgt_ids)) <= self.MAX_LEN:
+                self.src_ids.append(src_ids)
+                self.tgt_ids.append(tgt_ids)
+                continue
+
+            src_sents = self._split_sentences(src_text)
+            tgt_sents = self._split_sentences(tgt_text)
+
+            if len(src_sents) != len(tgt_sents):
+                continue
+
+            cur_src, cur_tgt = [], []
+
+            for s_src, s_tgt in zip(src_sents, tgt_sents):
+                trial_src = cur_src + [s_src]
+                trial_tgt = cur_tgt + [s_tgt]
+
+                if max(
+                    len(enc_src(" ".join(trial_src))),
+                    len(enc_tgt(" ".join(trial_tgt))),
+                ) <= self.MAX_LEN:
+                    cur_src, cur_tgt = trial_src, trial_tgt
+                    continue
+
+                if cur_src:
+                    self.src_ids.append(enc_src(" ".join(cur_src)))
+                    self.tgt_ids.append(enc_tgt(" ".join(cur_tgt)))
+
+                cur_src, cur_tgt = [s_src], [s_tgt]
+
+            if cur_src:
+                src_ids = enc_src(" ".join(cur_src))
+                tgt_ids = enc_tgt(" ".join(cur_tgt))
+
+                if max(len(src_ids), len(tgt_ids)) <= self.MAX_LEN:
+                    self.src_ids.append(src_ids)
+                    self.tgt_ids.append(tgt_ids)
+
+    def _split_sentences(self, text):
+        return [
+            s.strip()
+            for s in re.split(r'(?<=[.!?;:])\s+', text.strip())
+            if s.strip()
+        ]
+
+    def __len__(self):
+        return len(self.src_ids)
+
+    def __getitem__(self, index):
+        src = self.src_ids[index]
+        tgt = self.tgt_ids[index]
+
+        return {
+            "encoder_input_ids": torch.tensor(src, dtype=torch.long),
+            "decoder_input_ids": torch.tensor(tgt[:-1], dtype=torch.long),
+            "target_ids": torch.tensor(tgt[1:], dtype=torch.long),
+        }
+
+def auto_dataset(src_path, tgt_path, tokenizer):
+    if config.MODEL_TYPE == "seq2seq":
+        return Seq2SeqDataset(src_path, tgt_path, tokenizer)
+    elif config.MODEL_TYPE == "causal_lm":
+        return CausalLMDataset(src_path, tgt_path, tokenizer)
+    else:
+        raise ValueError(f"Don't support {config.MODEL_TYPE}.")
