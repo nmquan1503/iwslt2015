@@ -15,19 +15,33 @@ def train_tokenizer():
     with open("_temp_texts.txt", "w", encoding="utf-8") as f:
         for t in all_texts:
             f.write(t.strip() + "\n")
-    
-    spm.SentencePieceTrainer.Train(
-        input=f"_temp_texts.txt",
-        model_prefix=config.SPM_MODEL_PATH.split(".model")[0],
-        vocab_size=config.VOCAB_SIZE,
-        model_type="unigram",
-        character_coverage=0.9995,
-        pad_id=config.PAD_ID,
-        unk_id=config.UNK_ID,
-        bos_id=config.BOS_ID,
-        eos_id=config.EOS_ID,
-        minloglevel=2
-    )
+    if config.MODEL_TYPE == "causal_lm":
+        spm.SentencePieceTrainer.Train(
+            input=f"_temp_texts.txt",
+            model_prefix=config.SPM_MODEL_PATH.split(".model")[0],
+            vocab_size=config.VOCAB_SIZE,
+            model_type="unigram",
+            character_coverage=0.9995,
+            pad_id=config.PAD_ID,
+            unk_id=config.UNK_ID,
+            bos_id=config.BOS_ID,
+            eos_id=config.EOS_ID,
+            minloglevel=2
+        )
+    else:
+        spm.SentencePieceTrainer.Train(
+            input=f"_temp_texts.txt",
+            model_prefix=config.SPM_MODEL_PATH.split(".model")[0],
+            vocab_size=config.VOCAB_SIZE - 1,
+            model_type="unigram",
+            character_coverage=0.9995,
+            pad_id=config.PAD_ID,
+            unk_id=config.UNK_ID,
+            bos_id=config.BOS_ID,
+            eos_id=config.EOS_ID,
+            user_defined_symbols=["[CLS]"],
+            minloglevel=2
+        )
 
     os.remove("_temp_texts.txt")
 
@@ -43,8 +57,11 @@ class Tokenizer:
         self.unk_id = self.sp.unk_id()
         self.bos_id = self.sp.bos_id()
         self.eos_id = self.sp.eos_id()
+        self.cls_id = None
+        if self.sp.piece_to_id("[CLS]") != -1:
+            self.cls_id = self.sp.piece_to_id("[CLS]")
     
-    def encode(self, texts: str | List[str], add_bos=True, add_eos=True):
+    def encode(self, texts: str | List[str], add_bos=True, add_eos=True, add_cls=False):
         ids = self.sp.Encode(texts, out_type=int)
 
         if add_bos:
@@ -59,6 +76,12 @@ class Tokenizer:
             else:
                 ids = [i + [self.eos_id] for i in ids]
         
+        if add_cls and self.cls_id is not None:
+            if isinstance(texts, str):
+                ids = [self.cls_id] + ids
+            else:
+                ids = [[self.cls_id] + i for i in ids]
+
         return ids
 
     def decode(self, ids: List[int] | List[List[int]]):

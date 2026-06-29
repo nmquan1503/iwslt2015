@@ -22,8 +22,8 @@ class CausalLMDataset(Dataset):
 
         assert len(src_texts) == len(tgt_texts)
 
-        enc_src = lambda x: tokenizer.encode([x], add_bos=False, add_eos=False)[0]
-        enc_tgt = lambda x: tokenizer.encode([x], add_bos=True, add_eos=True)[0]
+        enc_src = lambda x: tokenizer.encode([x], add_bos=False, add_eos=False, add_cls=False)[0]
+        enc_tgt = lambda x: tokenizer.encode([x], add_bos=True, add_eos=True, add_cls=False)[0]
 
         for src_text, tgt_text in zip(src_texts, tgt_texts):
             src_ids = enc_src(src_text)
@@ -107,8 +107,8 @@ class Seq2SeqDataset(Dataset):
 
         assert len(src_texts) == len(tgt_texts)
 
-        enc_src = lambda x: tokenizer.encode([x], add_bos=False, add_eos=False)[0]
-        enc_tgt = lambda x: tokenizer.encode([x], add_bos=True, add_eos=True)[0]
+        enc_src = lambda x: tokenizer.encode([x], add_bos=False, add_eos=False, add_cls=True)[0]
+        enc_tgt = lambda x: tokenizer.encode([x], add_bos=True, add_eos=True, add_cls=False)[0]
 
         for src_text, tgt_text in zip(src_texts, tgt_texts):
             src_ids = enc_src(src_text)
