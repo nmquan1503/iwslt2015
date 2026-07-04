@@ -42,7 +42,6 @@ def train():
             dropout_rate=config.DROPOUT_RATE,
             device=device
         )).to("cuda")
-    model.warmup(config.BATCH_SIZE)
 
     total_params = sum(p.numel() for p in model.parameters())
     print(f"Total params: {total_params:,}")

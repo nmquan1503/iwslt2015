@@ -29,7 +29,6 @@ def _generate_preds_causal_lm():
             device=device
         )
     ).to(device)
-    model.warmup(config.BATCH_SIZE)
 
     model.load_state_dict(
         torch.load(
@@ -99,7 +98,6 @@ def _generate_preds_seq2seq():
             device=device
         )
     ).to(device)
-    model.warmup(config.BATCH_SIZE)
 
     model.load_state_dict(
         torch.load(
