@@ -90,7 +90,7 @@ class CausalLMTrainer(Trainer):
             bos_mask = (input_ids == config.BOS_ID)
             bos_idx = bos_mask.long().argmax(dim=1)
 
-            logits = self.model(input_ids)
+            logits = self.model(input_ids, bos_idx=bos_idx)
             
             loss = self.criterion(logits.view(-1, config.VOCAB_SIZE), target_ids.view(-1))
 
