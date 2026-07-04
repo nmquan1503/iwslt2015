@@ -2,7 +2,7 @@ import torch
 import argparse
 import os
 
-from selective_attention.models import (
+from attention.models import (
     CausalLM, CausalLMConfig,
     Seq2SeqLM, Seq2SeqLMConfig
 )
@@ -27,11 +27,9 @@ def train():
             vocab_size=config.VOCAB_SIZE,
             model_dim=config.MODEL_DIM,
             head_dim=config.HEAD_DIM,
-            ssm_state_dim=config.SSM_STATE_DIM,
-            ssm_conv_kernel_size=config.SSM_CONV_KERNEL_SIZE,
-            ssm_num_groups=config.SSM_NUM_GROUPS,
-            ssm_chunk_size=config.SSM_CHUNK_SIZE,
             num_layers=config.NUM_LAYERS,
+            selective=config.SELECTIVE,
+            forget=config.FORGET,
             dropout_rate=config.DROPOUT_RATE,
             device=device
         )).to("cuda")
@@ -40,10 +38,6 @@ def train():
             vocab_size=config.VOCAB_SIZE,
             model_dim=config.MODEL_DIM,
             head_dim=config.HEAD_DIM,
-            ssm_state_dim=config.SSM_STATE_DIM,
-            ssm_conv_kernel_size=config.SSM_CONV_KERNEL_SIZE,
-            ssm_num_groups=config.SSM_NUM_GROUPS,
-            ssm_chunk_size=config.SSM_CHUNK_SIZE,
             num_layers=config.NUM_LAYERS,
             dropout_rate=config.DROPOUT_RATE,
             device=device

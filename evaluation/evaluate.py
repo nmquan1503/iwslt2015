@@ -23,10 +23,8 @@ def _generate_preds_causal_lm():
             vocab_size=config.VOCAB_SIZE,
             model_dim=config.MODEL_DIM,
             head_dim=config.HEAD_DIM,
-            ssm_state_dim=config.SSM_STATE_DIM,
-            ssm_conv_kernel_size=config.SSM_CONV_KERNEL_SIZE,
-            ssm_num_groups=config.SSM_NUM_GROUPS,
-            ssm_chunk_size=config.SSM_CHUNK_SIZE,
+            selective=config.SELECTIVE,
+            forget=config.FORGET,
             num_layers=config.NUM_LAYERS,
             device=device
         )
@@ -42,12 +40,11 @@ def _generate_preds_causal_lm():
     model.eval()
 
     gen_cfg = GenerationConfig(
-        attn_gate_thresholds=config.ATTN_GATE_THRESHOLDS,
         bos_token_id=tokenizer.bos_id,
         eos_token_id=tokenizer.eos_id,
         pad_token_id=tokenizer.pad_id,
         max_new_tokens=config.MAX_NEW_TOKENS,
-        cache_update_interval=config.CACHE_UPDATE_INTERVAL,
+        selective_budget=config.SELECTIVE_BUDGET,
     )
 
     all_inputs, all_preds, all_refs = [], [], []

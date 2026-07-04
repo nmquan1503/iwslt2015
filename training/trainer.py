@@ -60,8 +60,10 @@ class CausalLMTrainer(Trainer):
             input_ids = batch["fused_input_ids"].to(self.device)
             target_ids = batch["fused_target_ids"].to(self.device)
             fused_lengths = batch["fused_lengths"].to(self.device)
+            bos_mask = (input_ids == config.BOS_ID)
+            bos_idx = bos_mask.long().argmax(dim=1)
 
-            logits = self.model(input_ids)
+            logits = self.model(input_ids, bos_idx=bos_idx)
 
             loss = self.criterion(logits.view(-1, config.VOCAB_SIZE), target_ids.view(-1))
 
@@ -85,6 +87,8 @@ class CausalLMTrainer(Trainer):
             input_ids = batch["fused_input_ids"].to(self.device)
             target_ids = batch["fused_target_ids"].to(self.device)
             fused_lengths = batch["fused_lengths"].to(self.device)
+            bos_mask = (input_ids == config.BOS_ID)
+            bos_idx = bos_mask.long().argmax(dim=1)
 
             logits = self.model(input_ids)
             
