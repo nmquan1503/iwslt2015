@@ -90,10 +90,6 @@ def _generate_preds_seq2seq():
             vocab_size=config.VOCAB_SIZE,
             model_dim=config.MODEL_DIM,
             head_dim=config.HEAD_DIM,
-            ssm_state_dim=config.SSM_STATE_DIM,
-            ssm_conv_kernel_size=config.SSM_CONV_KERNEL_SIZE,
-            ssm_num_groups=config.SSM_NUM_GROUPS,
-            ssm_chunk_size=config.SSM_CHUNK_SIZE,
             num_layers=config.NUM_LAYERS,
             device=device
         )
