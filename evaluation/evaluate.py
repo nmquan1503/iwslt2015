@@ -108,10 +108,6 @@ def _generate_preds_seq2seq():
         eos_token_id=tokenizer.eos_id,
         pad_token_id=tokenizer.pad_id,
         max_new_tokens=config.MAX_NEW_TOKENS,
-        cache_update_interval=config.CACHE_UPDATE_INTERVAL,
-        enc_attn_gate_thresholds=config.ENC_ATTN_GATE_THRESHOLDS,
-        attn_gate_thresholds=config.ATTN_GATE_THRESHOLDS,
-        cross_attn_gate_thresholds=config.CROSS_ATTN_GATE_THRESHOLDS
     )
 
     all_inputs, all_preds, all_refs = [], [], []
