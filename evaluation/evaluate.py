@@ -9,7 +9,7 @@ from selective_attention.models import (
     CausalLM, CausalLMConfig,
     Seq2SeqLM, Seq2SeqLMConfig
 )
-from selective_attention.inference import GenerationConfig
+from selective_attention.inference import GenerationConfig, AnalysisConfig
 import config
 from evaluation.metrics import compute_bleu, compute_rouge
 
@@ -50,6 +50,12 @@ def _generate_preds_causal_lm():
         cache_update_interval=config.CACHE_UPDATE_INTERVAL,
     )
 
+    analysis_cfg = AnalysisConfig()
+    num_heads = config.MODEL_DIM // config.HEAD_DIM
+    num_bins = 100
+    global_sums = [torch.zeros(num_heads, num_bins, device=device) for _ in range(num_layers = config.NUM_LAYERS)]
+    global_counts = [torch.zeros(num_heads, num_bins, device=device) for _ in range(num_layers = config.NUM_LAYERS)]
+
     all_inputs, all_preds, all_refs = [], [], []
 
     torch.cuda.empty_cache()
@@ -58,7 +64,13 @@ def _generate_preds_causal_lm():
     with torch.inference_mode():
         for batch in tqdm(test_loader, desc="Test"):
             input_ids = batch["input_ids"].to(device)
-            pred_ids = model.generate(input_ids, gen_cfg).cpu()
+            pred_ids, batch_stats = model.generate(input_ids, gen_cfg, analysis_cfg)
+            pred_ids = pred_ids.cpu()
+
+            for layer_idx in range(config.NUM_LAYERS):
+                layer_stats = batch_stats[layer_idx]["causal_attn_gate_analysis"]
+                global_sums[layer_idx] += layer_stats["sum"].cpu()
+                global_counts[layer_idx] += layer_stats["count"].cpu()
 
             for inp, pred, tgt in zip(
                 input_ids.cpu(),
@@ -76,6 +88,17 @@ def _generate_preds_causal_lm():
                 all_inputs.append(tokenizer.decode(inp.tolist()))
                 all_preds.append(tokenizer.decode(pred))
                 all_refs.append(tokenizer.decode(tgt))
+    
+    layers_stats = []
+    for s, c in zip(global_sums, global_counts):
+        layers_stats.append({
+            "causal_attn_gate_analysis": {"sum": s, "count": c}
+        })
+    torch.save({
+        "layers": layers_stats,
+        "num_bins": num_bins
+    }, "gate_attn_stats.pt")
+    print("Đã lưu gate_attn_stats.pt")
 
     return (
         all_inputs,
