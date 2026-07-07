@@ -53,8 +53,8 @@ def _generate_preds_causal_lm():
     analysis_cfg = AnalysisConfig()
     num_heads = config.MODEL_DIM // config.HEAD_DIM
     num_bins = 100
-    global_sums = [torch.zeros(num_heads, num_bins, device=device) for _ in range(num_layers = config.NUM_LAYERS)]
-    global_counts = [torch.zeros(num_heads, num_bins, device=device) for _ in range(num_layers = config.NUM_LAYERS)]
+    global_sums = [torch.zeros(num_heads, num_bins, device=device) for _ in range(config.NUM_LAYERS)]
+    global_counts = [torch.zeros(num_heads, num_bins, device=device) for _ in range(config.NUM_LAYERS)]
 
     all_inputs, all_preds, all_refs = [], [], []
 
@@ -149,12 +149,12 @@ def _generate_preds_seq2seq():
     analysis_cfg = AnalysisConfig()
     num_heads = config.MODEL_DIM // config.HEAD_DIM
     num_bins = 100
-    global_enc_sums = [torch.zeros(num_heads, num_bins, device=device) for _ in range(num_layers = config.NUM_LAYERS)]
-    global_enc_counts = [torch.zeros(num_heads, num_bins, device=device) for _ in range(num_layers = config.NUM_LAYERS)]
-    global_dec_sums = [torch.zeros(num_heads, num_bins, device=device) for _ in range(num_layers = config.NUM_LAYERS)]
-    global_dec_counts = [torch.zeros(num_heads, num_bins, device=device) for _ in range(num_layers = config.NUM_LAYERS)]
-    global_cross_sums = [torch.zeros(num_heads, num_bins, device=device) for _ in range(num_layers = config.NUM_LAYERS)]
-    global_cross_counts = [torch.zeros(num_heads, num_bins, device=device) for _ in range(num_layers = config.NUM_LAYERS)]
+    global_enc_sums = [torch.zeros(num_heads, num_bins, device=device) for _ in range(config.NUM_LAYERS)]
+    global_enc_counts = [torch.zeros(num_heads, num_bins, device=device) for _ in range(config.NUM_LAYERS)]
+    global_dec_sums = [torch.zeros(num_heads, num_bins, device=device) for _ in range(config.NUM_LAYERS)]
+    global_dec_counts = [torch.zeros(num_heads, num_bins, device=device) for _ in range(config.NUM_LAYERS)]
+    global_cross_sums = [torch.zeros(num_heads, num_bins, device=device) for _ in range(config.NUM_LAYERS)]
+    global_cross_counts = [torch.zeros(num_heads, num_bins, device=device) for _ in range(config.NUM_LAYERS)]
 
     all_inputs, all_preds, all_refs = [], [], []
 
