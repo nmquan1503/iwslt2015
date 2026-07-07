@@ -146,6 +146,16 @@ def _generate_preds_seq2seq():
         cross_attn_gate_thresholds=config.CROSS_ATTN_GATE_THRESHOLDS
     )
 
+    analysis_cfg = AnalysisConfig()
+    num_heads = config.MODEL_DIM // config.HEAD_DIM
+    num_bins = 100
+    global_enc_sums = [torch.zeros(num_heads, num_bins, device=device) for _ in range(num_layers = config.NUM_LAYERS)]
+    global_enc_counts = [torch.zeros(num_heads, num_bins, device=device) for _ in range(num_layers = config.NUM_LAYERS)]
+    global_dec_sums = [torch.zeros(num_heads, num_bins, device=device) for _ in range(num_layers = config.NUM_LAYERS)]
+    global_dec_counts = [torch.zeros(num_heads, num_bins, device=device) for _ in range(num_layers = config.NUM_LAYERS)]
+    global_cross_sums = [torch.zeros(num_heads, num_bins, device=device) for _ in range(num_layers = config.NUM_LAYERS)]
+    global_cross_counts = [torch.zeros(num_heads, num_bins, device=device) for _ in range(num_layers = config.NUM_LAYERS)]
+
     all_inputs, all_preds, all_refs = [], [], []
 
     torch.cuda.empty_cache()
@@ -156,10 +166,21 @@ def _generate_preds_seq2seq():
             input_ids = batch["encoder_input_ids"].to(device)
             target_ids = batch["target_ids"].to(device)
 
-            pred_ids = model.generate(
-                input_ids=input_ids,
-                gen_cfg=gen_cfg,
-            ).cpu()
+            pred_ids, batch_stats = model.generate(input_ids, gen_cfg, analysis_cfg)
+            pred_ids = pred_ids.cpu()
+
+            for layer_idx in range(config.NUM_LAYERS):
+                layer_enc_stats = batch_stats[layer_idx]["non_causal_attn_gate_analysis"]
+                global_enc_sums[layer_idx] += layer_enc_stats["sum"].cpu()
+                global_enc_counts[layer_idx] += layer_enc_stats["count"].cpu()
+                
+                layer_dec_stats = batch_stats[layer_idx]["causal_attn_gate_analysis"]
+                global_dec_sums[layer_idx] += layer_dec_stats["sum"].cpu()
+                global_dec_counts[layer_idx] += layer_dec_stats["count"].cpu()
+
+                layer_cross_stats = batch_stats[layer_idx]["cross_attn_gate_analysis"]
+                global_cross_sums[layer_idx] += layer_cross_stats["sum"].cpu()
+                global_cross_counts[layer_idx] += layer_cross_stats["count"].cpu()
 
             for inp, pred, tgt in zip(
                 input_ids.cpu(),
@@ -178,6 +199,34 @@ def _generate_preds_seq2seq():
                 all_inputs.append(tokenizer.decode(inp.tolist()))
                 all_preds.append(tokenizer.decode(pred))
                 all_refs.append(tokenizer.decode(tgt))
+
+    layers_stats = []
+
+    for layer_idx in range(config.NUM_LAYERS):
+        layers_stats.append({
+            "non_causal_attn_gate_analysis": {
+                "sum": global_enc_sums[layer_idx],
+                "count": global_enc_counts[layer_idx],
+            },
+            "causal_attn_gate_analysis": {
+                "sum": global_dec_sums[layer_idx],
+                "count": global_dec_counts[layer_idx],
+            },
+            "cross_attn_gate_analysis": {
+                "sum": global_cross_sums[layer_idx],
+                "count": global_cross_counts[layer_idx],
+            },
+        })
+
+    torch.save(
+        {
+            "layers": layers_stats,
+            "num_bins": num_bins,
+        },
+        "gate_attn_stats.pt",
+    )
+
+    print("Đã lưu gate_attn_stats.pt")
 
     return (
         all_inputs,
