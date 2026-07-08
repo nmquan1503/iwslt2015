@@ -11,7 +11,7 @@ from selective_attention.models import (
 )
 from selective_attention.inference import GenerationConfig, AnalysisConfig
 import config
-from evaluation.metrics import compute_bleu, compute_rouge
+from evaluation.metrics import compute_bleu, compute_rouge, compute_comet
 
 def _generate_preds_causal_lm():
     tokenizer = Tokenizer()
@@ -64,13 +64,16 @@ def _generate_preds_causal_lm():
     with torch.inference_mode():
         for batch in tqdm(test_loader, desc="Test"):
             input_ids = batch["input_ids"].to(device)
-            pred_ids, batch_stats = model.generate(input_ids, gen_cfg, analysis_cfg)
-            pred_ids = pred_ids.cpu()
+            if config.ANALYSIS:
+                pred_ids, batch_stats = model.generate(input_ids, gen_cfg, analysis_cfg)
+                for layer_idx in range(config.NUM_LAYERS):
+                    layer_stats = batch_stats[layer_idx]["causal_attn_gate_analysis"]
+                    global_sums[layer_idx] += layer_stats["sum"]
+                    global_counts[layer_idx] += layer_stats["count"]
+            else:
+                pred_ids = model.generate(input_ids, gen_cfg)
 
-            for layer_idx in range(config.NUM_LAYERS):
-                layer_stats = batch_stats[layer_idx]["causal_attn_gate_analysis"]
-                global_sums[layer_idx] += layer_stats["sum"].cpu()
-                global_counts[layer_idx] += layer_stats["count"].cpu()
+            pred_ids = pred_ids.cpu()
 
             for inp, pred, tgt in zip(
                 input_ids.cpu(),
@@ -89,16 +92,17 @@ def _generate_preds_causal_lm():
                 all_preds.append(tokenizer.decode(pred))
                 all_refs.append(tokenizer.decode(tgt))
     
-    layers_stats = []
-    for s, c in zip(global_sums, global_counts):
-        layers_stats.append({
-            "causal_attn_gate_analysis": {"sum": s, "count": c}
-        })
-    torch.save({
-        "layers": layers_stats,
-        "num_bins": num_bins
-    }, "gate_attn_stats.pt")
-    print("Đã lưu gate_attn_stats.pt")
+    if config.ANALYSIS:
+        layers_stats = []
+        for s, c in zip(global_sums, global_counts):
+            layers_stats.append({
+                "causal_attn_gate_analysis": {"sum": s, "count": c}
+            })
+        torch.save({
+            "layers": layers_stats,
+            "num_bins": num_bins
+        }, "gate_attn_stats.pt")
+        print("Đã lưu gate_attn_stats.pt")
 
     return (
         all_inputs,
@@ -166,21 +170,24 @@ def _generate_preds_seq2seq():
             input_ids = batch["encoder_input_ids"].to(device)
             target_ids = batch["target_ids"].to(device)
 
-            pred_ids, batch_stats = model.generate(input_ids, gen_cfg, analysis_cfg)
+            if config.ANALYSIS:
+                pred_ids, batch_stats = model.generate(input_ids, gen_cfg, analysis_cfg)
+                for layer_idx in range(config.NUM_LAYERS):
+                    layer_enc_stats = batch_stats[layer_idx]["non_causal_attn_gate_analysis"]
+                    global_enc_sums[layer_idx] += layer_enc_stats["sum"]
+                    global_enc_counts[layer_idx] += layer_enc_stats["count"]
+                    
+                    layer_dec_stats = batch_stats[layer_idx]["causal_attn_gate_analysis"]
+                    global_dec_sums[layer_idx] += layer_dec_stats["sum"]
+                    global_dec_counts[layer_idx] += layer_dec_stats["count"]
+
+                    layer_cross_stats = batch_stats[layer_idx]["cross_attn_gate_analysis"]
+                    global_cross_sums[layer_idx] += layer_cross_stats["sum"]
+                    global_cross_counts[layer_idx] += layer_cross_stats["count"]
+            else:
+                pred_ids = model.generate(input_ids, gen_cfg)
+
             pred_ids = pred_ids.cpu()
-
-            for layer_idx in range(config.NUM_LAYERS):
-                layer_enc_stats = batch_stats[layer_idx]["non_causal_attn_gate_analysis"]
-                global_enc_sums[layer_idx] += layer_enc_stats["sum"].cpu()
-                global_enc_counts[layer_idx] += layer_enc_stats["count"].cpu()
-                
-                layer_dec_stats = batch_stats[layer_idx]["causal_attn_gate_analysis"]
-                global_dec_sums[layer_idx] += layer_dec_stats["sum"].cpu()
-                global_dec_counts[layer_idx] += layer_dec_stats["count"].cpu()
-
-                layer_cross_stats = batch_stats[layer_idx]["cross_attn_gate_analysis"]
-                global_cross_sums[layer_idx] += layer_cross_stats["sum"].cpu()
-                global_cross_counts[layer_idx] += layer_cross_stats["count"].cpu()
 
             for inp, pred, tgt in zip(
                 input_ids.cpu(),
@@ -200,33 +207,34 @@ def _generate_preds_seq2seq():
                 all_preds.append(tokenizer.decode(pred))
                 all_refs.append(tokenizer.decode(tgt))
 
-    layers_stats = []
+    if config.ANALYSIS:
+        layers_stats = []
 
-    for layer_idx in range(config.NUM_LAYERS):
-        layers_stats.append({
-            "non_causal_attn_gate_analysis": {
-                "sum": global_enc_sums[layer_idx],
-                "count": global_enc_counts[layer_idx],
-            },
-            "causal_attn_gate_analysis": {
-                "sum": global_dec_sums[layer_idx],
-                "count": global_dec_counts[layer_idx],
-            },
-            "cross_attn_gate_analysis": {
-                "sum": global_cross_sums[layer_idx],
-                "count": global_cross_counts[layer_idx],
-            },
-        })
+        for layer_idx in range(config.NUM_LAYERS):
+            layers_stats.append({
+                "non_causal_attn_gate_analysis": {
+                    "sum": global_enc_sums[layer_idx],
+                    "count": global_enc_counts[layer_idx],
+                },
+                "causal_attn_gate_analysis": {
+                    "sum": global_dec_sums[layer_idx],
+                    "count": global_dec_counts[layer_idx],
+                },
+                "cross_attn_gate_analysis": {
+                    "sum": global_cross_sums[layer_idx],
+                    "count": global_cross_counts[layer_idx],
+                },
+            })
 
-    torch.save(
-        {
-            "layers": layers_stats,
-            "num_bins": num_bins,
-        },
-        "gate_attn_stats.pt",
-    )
+        torch.save(
+            {
+                "layers": layers_stats,
+                "num_bins": num_bins,
+            },
+            "gate_attn_stats.pt",
+        )
 
-    print("Đã lưu gate_attn_stats.pt")
+        print("Đã lưu gate_attn_stats.pt")
 
     return (
         all_inputs,
@@ -256,6 +264,7 @@ def evaluate():
     metrics = {
         **compute_bleu(all_preds, all_refs),
         **compute_rouge(all_preds, all_refs),
+        **compute_comet(all_inputs, all_preds, all_refs, config.COMET_BATCH_SIZE, config.COMET_NUM_GPUS)
     }
 
     print("\n===== QUALITY =====")
