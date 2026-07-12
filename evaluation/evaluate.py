@@ -53,8 +53,9 @@ def _generate_preds_causal_lm():
     analysis_cfg = AnalysisConfig()
     num_heads = config.MODEL_DIM // config.HEAD_DIM
     num_bins = 100
-    global_sums = [torch.zeros(num_heads, num_bins, device=device) for _ in range(config.NUM_LAYERS)]
-    global_counts = [torch.zeros(num_heads, num_bins, device=device) for _ in range(config.NUM_LAYERS)]
+    global_attn_mass = [torch.zeros(num_heads, num_bins, device=device) for _ in range(config.NUM_LAYERS)]
+    global_attn_count = [torch.zeros(num_heads, num_bins, device=device) for _ in range(config.NUM_LAYERS)]
+    global_gate_freq = [torch.zeros(num_heads, num_bins, device=device) for _ in range(config.NUM_LAYERS)]
 
     all_inputs, all_preds, all_refs = [], [], []
 
@@ -68,8 +69,9 @@ def _generate_preds_causal_lm():
                 pred_ids, batch_stats = model.generate(input_ids, gen_cfg, analysis_cfg)
                 for layer_idx in range(config.NUM_LAYERS):
                     layer_stats = batch_stats[layer_idx]["causal_attn_gate_analysis"]
-                    global_sums[layer_idx] += layer_stats["sum"]
-                    global_counts[layer_idx] += layer_stats["count"]
+                    global_attn_mass[layer_idx] += layer_stats["attn_mass"]
+                    global_attn_count[layer_idx] += layer_stats["attn_count"]
+                    global_gate_freq[layer_idx] += layer_stats["gate_freq"]
             else:
                 pred_ids = model.generate(input_ids, gen_cfg)
 
@@ -94,9 +96,13 @@ def _generate_preds_causal_lm():
     
     if config.ANALYSIS:
         layers_stats = []
-        for s, c in zip(global_sums, global_counts):
+        for mass, count, freq in zip(global_attn_mass, global_attn_count, global_gate_freq):
             layers_stats.append({
-                "causal_attn_gate_analysis": {"sum": s, "count": c}
+                "causal_attn_gate_analysis": {
+                    "attn_mass": mass,
+                    "attn_count": count,
+                    "gate_freq": freq
+                }
             })
         torch.save({
             "layers": layers_stats,
@@ -153,12 +159,17 @@ def _generate_preds_seq2seq():
     analysis_cfg = AnalysisConfig()
     num_heads = config.MODEL_DIM // config.HEAD_DIM
     num_bins = 100
-    global_enc_sums = [torch.zeros(num_heads, num_bins, device=device) for _ in range(config.NUM_LAYERS)]
-    global_enc_counts = [torch.zeros(num_heads, num_bins, device=device) for _ in range(config.NUM_LAYERS)]
-    global_dec_sums = [torch.zeros(num_heads, num_bins, device=device) for _ in range(config.NUM_LAYERS)]
-    global_dec_counts = [torch.zeros(num_heads, num_bins, device=device) for _ in range(config.NUM_LAYERS)]
-    global_cross_sums = [torch.zeros(num_heads, num_bins, device=device) for _ in range(config.NUM_LAYERS)]
-    global_cross_counts = [torch.zeros(num_heads, num_bins, device=device) for _ in range(config.NUM_LAYERS)]
+    global_enc_attn_mass = [torch.zeros(num_heads, num_bins, device=device) for _ in range(config.NUM_LAYERS)]
+    global_enc_attn_count = [torch.zeros(num_heads, num_bins, device=device) for _ in range(config.NUM_LAYERS)]
+    global_enc_gate_freq = [torch.zeros(num_heads, num_bins, device=device) for _ in range(config.NUM_LAYERS)]
+
+    global_dec_attn_mass = [torch.zeros(num_heads, num_bins, device=device) for _ in range(config.NUM_LAYERS)]
+    global_dec_attn_count = [torch.zeros(num_heads, num_bins, device=device) for _ in range(config.NUM_LAYERS)]
+    global_dec_gate_freq = [torch.zeros(num_heads, num_bins, device=device) for _ in range(config.NUM_LAYERS)]
+
+    global_cross_attn_mass = [torch.zeros(num_heads, num_bins, device=device) for _ in range(config.NUM_LAYERS)]
+    global_cross_attn_count = [torch.zeros(num_heads, num_bins, device=device) for _ in range(config.NUM_LAYERS)]
+    global_cross_gate_freq = [torch.zeros(num_heads, num_bins, device=device) for _ in range(config.NUM_LAYERS)]
 
     all_inputs, all_preds, all_refs = [], [], []
 
@@ -173,17 +184,23 @@ def _generate_preds_seq2seq():
             if config.ANALYSIS:
                 pred_ids, batch_stats = model.generate(input_ids, gen_cfg, analysis_cfg)
                 for layer_idx in range(config.NUM_LAYERS):
+                    # Encoder stats
                     layer_enc_stats = batch_stats[layer_idx]["non_causal_attn_gate_analysis"]
-                    global_enc_sums[layer_idx] += layer_enc_stats["sum"]
-                    global_enc_counts[layer_idx] += layer_enc_stats["count"]
-                    
-                    layer_dec_stats = batch_stats[layer_idx]["causal_attn_gate_analysis"]
-                    global_dec_sums[layer_idx] += layer_dec_stats["sum"]
-                    global_dec_counts[layer_idx] += layer_dec_stats["count"]
+                    global_enc_attn_mass[layer_idx] += layer_enc_stats["attn_mass"]
+                    global_enc_attn_count[layer_idx] += layer_enc_stats["attn_count"]
+                    global_enc_gate_freq[layer_idx] += layer_enc_stats["gate_freq"]
 
+                    # Decoder stats
+                    layer_dec_stats = batch_stats[layer_idx]["causal_attn_gate_analysis"]
+                    global_dec_attn_mass[layer_idx] += layer_dec_stats["attn_mass"]
+                    global_dec_attn_count[layer_idx] += layer_dec_stats["attn_count"]
+                    global_dec_gate_freq[layer_idx] += layer_dec_stats["gate_freq"]
+
+                    # Cross-attention stats
                     layer_cross_stats = batch_stats[layer_idx]["cross_attn_gate_analysis"]
-                    global_cross_sums[layer_idx] += layer_cross_stats["sum"]
-                    global_cross_counts[layer_idx] += layer_cross_stats["count"]
+                    global_cross_attn_mass[layer_idx] += layer_cross_stats["attn_mass"]
+                    global_cross_attn_count[layer_idx] += layer_cross_stats["attn_count"]
+                    global_cross_gate_freq[layer_idx] += layer_cross_stats["gate_freq"]
             else:
                 pred_ids = model.generate(input_ids, gen_cfg)
 
@@ -213,16 +230,19 @@ def _generate_preds_seq2seq():
         for layer_idx in range(config.NUM_LAYERS):
             layers_stats.append({
                 "non_causal_attn_gate_analysis": {
-                    "sum": global_enc_sums[layer_idx],
-                    "count": global_enc_counts[layer_idx],
+                    "attn_mass": global_enc_attn_mass[layer_idx],
+                    "attn_count": global_enc_attn_count[layer_idx],
+                    "gate_freq": global_enc_gate_freq[layer_idx],
                 },
                 "causal_attn_gate_analysis": {
-                    "sum": global_dec_sums[layer_idx],
-                    "count": global_dec_counts[layer_idx],
+                    "attn_mass": global_dec_attn_mass[layer_idx],
+                    "attn_count": global_dec_attn_count[layer_idx],
+                    "gate_freq": global_dec_gate_freq[layer_idx],
                 },
                 "cross_attn_gate_analysis": {
-                    "sum": global_cross_sums[layer_idx],
-                    "count": global_cross_counts[layer_idx],
+                    "attn_mass": global_cross_attn_mass[layer_idx],
+                    "attn_count": global_cross_attn_count[layer_idx],
+                    "gate_freq": global_cross_gate_freq[layer_idx],
                 },
             })
 
