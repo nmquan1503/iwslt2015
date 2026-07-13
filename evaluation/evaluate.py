@@ -11,7 +11,7 @@ from attention.models import (
 )
 from attention.inference import GenerationConfig
 import config
-from evaluation.metrics import compute_bleu, compute_rouge
+from evaluation.metrics import compute_bleu, compute_rouge, compute_comet
 
 def _generate_preds_causal_lm():
     tokenizer = Tokenizer()
@@ -171,6 +171,7 @@ def evaluate():
     metrics = {
         **compute_bleu(all_preds, all_refs),
         **compute_rouge(all_preds, all_refs),
+        **compute_comet(all_inputs, all_preds, all_refs, config.COMET_BATCH_SIZE, config.COMET_NUM_GPUS)
     }
 
     print("\n===== QUALITY =====")

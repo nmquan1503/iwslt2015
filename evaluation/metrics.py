@@ -1,5 +1,6 @@
 import sacrebleu
 from rouge_score import rouge_scorer
+from comet import download_model, load_from_checkpoint
 
 def compute_bleu(preds, refs):
     return {
@@ -28,4 +29,26 @@ def compute_rouge(preds, refs):
         "rouge1": rouge1 / n,
         "rouge2": rouge2 / n,
         "rougeL": rougeL / n,
+    }
+
+def compute_comet(sources, preds, refs, batch_size=32, gpus=1):
+    model_path = download_model("Unbabel/wmt22-comet-da")
+    model = load_from_checkpoint(model_path)
+    data = [
+        {
+            "src": src,
+            "mt": pred,
+            "ref": ref,
+        }
+        for src, pred, ref in zip(sources, preds, refs)
+    ]
+
+    result = model.predict(
+        data,
+        batch_size=batch_size,
+        gpus=gpus,
+    )
+
+    return {
+        "comet": result.system_score
     }
