@@ -59,6 +59,9 @@ def _generate_preds_causal_lm():
 
     all_inputs, all_preds, all_refs = [], [], []
 
+    total_kept_ratio_sum = 0.0
+    total_batches = 0
+
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
 
@@ -66,12 +69,16 @@ def _generate_preds_causal_lm():
         for batch in tqdm(test_loader, desc="Test"):
             input_ids = batch["input_ids"].to(device)
             if config.ANALYSIS:
-                pred_ids, batch_stats = model.generate(input_ids, gen_cfg, analysis_cfg)
+                pred_ids, stats_dict = model.generate(input_ids, gen_cfg, analysis_cfg)
+                batch_stats = stats_dict["layers"]
                 for layer_idx in range(config.NUM_LAYERS):
                     layer_stats = batch_stats[layer_idx]["causal_attn_gate_analysis"]
                     global_attn_mass[layer_idx] += layer_stats["attn_mass"]
                     global_attn_count[layer_idx] += layer_stats["attn_count"]
                     global_gate_freq[layer_idx] += layer_stats["gate_freq"]
+                token_kept_ratio = stats_dict["overall"]["token_kept_ratio"]
+                total_kept_ratio_sum += token_kept_ratio
+                total_batches += 1
             else:
                 pred_ids = model.generate(input_ids, gen_cfg)
 
@@ -109,6 +116,9 @@ def _generate_preds_causal_lm():
             "num_bins": num_bins
         }, "gate_attn_stats.pt")
         print("Đã lưu gate_attn_stats.pt")
+        if total_batches > 0:
+            avg_kept_ratio = total_kept_ratio_sum / total_batches
+            print(f"Token kept ratio trung bình: {avg_kept_ratio:.4f}")
 
     return (
         all_inputs,
@@ -173,6 +183,9 @@ def _generate_preds_seq2seq():
 
     all_inputs, all_preds, all_refs = [], [], []
 
+    total_kept_ratio_sum = 0.0
+    total_batches = 0
+
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
 
@@ -182,7 +195,8 @@ def _generate_preds_seq2seq():
             target_ids = batch["target_ids"].to(device)
 
             if config.ANALYSIS:
-                pred_ids, batch_stats = model.generate(input_ids, gen_cfg, analysis_cfg)
+                pred_ids, stats_dict = model.generate(input_ids, gen_cfg, analysis_cfg)
+                batch_stats = stats_dict["layers"]
                 for layer_idx in range(config.NUM_LAYERS):
                     # Encoder stats
                     layer_enc_stats = batch_stats[layer_idx]["non_causal_attn_gate_analysis"]
@@ -201,6 +215,9 @@ def _generate_preds_seq2seq():
                     global_cross_attn_mass[layer_idx] += layer_cross_stats["attn_mass"]
                     global_cross_attn_count[layer_idx] += layer_cross_stats["attn_count"]
                     global_cross_gate_freq[layer_idx] += layer_cross_stats["gate_freq"]
+                token_kept_ratio = stats_dict["overall"]["token_kept_ratio"]
+                total_kept_ratio_sum += token_kept_ratio
+                total_batches += 1
             else:
                 pred_ids = model.generate(input_ids, gen_cfg)
 
@@ -255,6 +272,9 @@ def _generate_preds_seq2seq():
         )
 
         print("Đã lưu gate_attn_stats.pt")
+        if total_batches > 0:
+            avg_kept_ratio = total_kept_ratio_sum / total_batches
+            print(f"Token kept ratio trung bình: {avg_kept_ratio:.4f}")
 
     return (
         all_inputs,
