@@ -41,6 +41,7 @@ def train():
             vocab_size=config.VOCAB_SIZE,
             model_dim=config.MODEL_DIM,
             head_dim=config.HEAD_DIM,
+            attn_log_gate_penalty=config.ATTN_LOG_GATE_PENALTY,
             ssm_state_dim=config.SSM_STATE_DIM,
             ssm_conv_kernel_size=config.SSM_CONV_KERNEL_SIZE,
             ssm_num_groups=config.SSM_NUM_GROUPS,
