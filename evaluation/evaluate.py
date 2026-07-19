@@ -73,6 +73,8 @@ def _generate_preds_causal_lm():
                 pred_ids, stats_dict = model.generate(input_ids, gen_cfg, analysis_cfg)
                 batch_stats = stats_dict["layers"]
                 for layer_idx in range(config.NUM_LAYERS):
+                    if "causal_attn_gate_analysis" not in batch_stats["layers"]:
+                        continue
                     layer_stats = batch_stats[layer_idx]["causal_attn_gate_analysis"]
                     global_attn_mass[layer_idx] += layer_stats["attn_mass"]
                     global_attn_count[layer_idx] += layer_stats["attn_count"]
@@ -200,6 +202,12 @@ def _generate_preds_seq2seq():
                 pred_ids, stats_dict = model.generate(input_ids, gen_cfg, analysis_cfg)
                 batch_stats = stats_dict["layers"]
                 for layer_idx in range(config.NUM_LAYERS):
+                    if (
+                        "causal_attn_gate_analysis" not in batch_stats["layers"]
+                        or "non_causal_attn_gate_analysis" not in batch_stats["layers"]
+                        or "cross_attn_gate_analysis" not in batch_stats["layers"]
+                    ):
+                        continue
                     # Encoder stats
                     layer_enc_stats = batch_stats[layer_idx]["non_causal_attn_gate_analysis"]
                     global_enc_attn_mass[layer_idx] += layer_enc_stats["attn_mass"]
