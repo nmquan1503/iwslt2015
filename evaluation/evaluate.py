@@ -60,7 +60,7 @@ def _generate_preds_causal_lm():
 
     all_inputs, all_preds, all_refs = [], [], []
 
-    total_kept_ratio_sum = 0.0
+    total_prefill_kept_ratio_sum = 0.0
     total_batches = 0
 
     torch.cuda.empty_cache()
@@ -79,8 +79,8 @@ def _generate_preds_causal_lm():
                     global_attn_mass[layer_idx] += layer_stats["attn_mass"]
                     global_attn_count[layer_idx] += layer_stats["attn_count"]
                     global_gate_freq[layer_idx] += layer_stats["gate_freq"]
-                token_kept_ratio = stats_dict["overall"]["token_kept_ratio"]
-                total_kept_ratio_sum += token_kept_ratio
+                prefill_kept_ratio = stats_dict["overall"]["prefill_kept_ratio"]
+                total_prefill_kept_ratio_sum += prefill_kept_ratio
                 total_batches += 1
             else:
                 pred_ids = model.generate(input_ids, gen_cfg)
@@ -120,8 +120,8 @@ def _generate_preds_causal_lm():
         }, "gate_attn_stats.pt")
         print("Đã lưu gate_attn_stats.pt")
         if total_batches > 0:
-            avg_kept_ratio = total_kept_ratio_sum / total_batches
-            print(f"Token kept ratio trung bình: {avg_kept_ratio:.4f}")
+            avg_prefill_kept_ratio = total_prefill_kept_ratio_sum / total_batches
+            print(f"Prefill kept ratio trung bình: {avg_prefill_kept_ratio:.4f}")
 
     return (
         all_inputs,
