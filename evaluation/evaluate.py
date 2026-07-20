@@ -80,7 +80,7 @@ def _generate_preds_causal_lm():
                     global_attn_count[layer_idx] += layer_stats["attn_count"]
                     global_gate_freq[layer_idx] += layer_stats["gate_freq"]
                 batch_kept_ratio = stats_dict["overall"]["kept_ratio"]
-                total_kept_ratio += batch_kept_ratio
+                total_kept_ratio_sum += batch_kept_ratio
                 total_batches += 1
             else:
                 pred_ids = model.generate(input_ids, gen_cfg)
@@ -120,7 +120,7 @@ def _generate_preds_causal_lm():
         }, "gate_attn_stats.pt")
         print("Đã lưu gate_attn_stats.pt")
         if total_batches > 0:
-            avg_kept_ratio = total_kept_ratio / total_batches
+            avg_kept_ratio = total_kept_ratio_sum / total_batches
             print(f"Kept ratio trung bình: {avg_kept_ratio:.4f}")
 
     return (
