@@ -5,11 +5,11 @@ import time
 
 from data.tokenizer import Tokenizer
 from data.dataloader import build_dataloader
-from selective_attention.models import (
+from minimal_attention.models import (
     CausalLM, CausalLMConfig,
     Seq2SeqLM, Seq2SeqLMConfig
 )
-from selective_attention.inference import GenerationConfig, AnalysisConfig
+from minimal_attention.inference import GenerationConfig, AnalysisConfig
 import config
 from evaluation.metrics import compute_bleu, compute_rouge, compute_comet
 

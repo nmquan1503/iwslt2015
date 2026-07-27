@@ -2,7 +2,7 @@ import torch
 import argparse
 import os
 
-from selective_attention.models import (
+from minimal_attention.models import (
     CausalLM, CausalLMConfig,
     Seq2SeqLM, Seq2SeqLMConfig
 )
