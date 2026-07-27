@@ -66,6 +66,8 @@ def _generate_preds_causal_lm():
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
 
+    start_time = time.perf_counter()
+
     with torch.inference_mode():
         for batch in tqdm(test_loader, desc="Test"):
             input_ids = batch["input_ids"].to(device)
@@ -103,6 +105,12 @@ def _generate_preds_causal_lm():
                 all_inputs.append(tokenizer.decode(inp.tolist()))
                 all_preds.append(tokenizer.decode(pred))
                 all_refs.append(tokenizer.decode(tgt))
+
+    total_time = time.perf_counter() - start_time
+    peak_mem = torch.cuda.max_memory_allocated()
+
+    print(f"Tổng thời gian inference: {total_time:.3f} giây")
+    print(f"Peak memory allocated: {peak_mem / 1024**2:.2f} MB")
     
     if config.ANALYSIS:
         layers_stats = []
@@ -303,6 +311,7 @@ def _write_preds(all_inputs, all_preds, all_refs):
 
 def evaluate():
     if config.MODEL_TYPE == "causal_lm":
+        all_inputs, all_preds, all_refs, peak_mem = _generate_preds_causal_lm()
         all_inputs, all_preds, all_refs, peak_mem = _generate_preds_causal_lm()
     elif config.MODEL_TYPE == "seq2seq":
         all_inputs, all_preds, all_refs, peak_mem = _generate_preds_seq2seq()
