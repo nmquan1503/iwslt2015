@@ -169,6 +169,7 @@ def _write_preds(all_inputs, all_preds, all_refs):
 
 def evaluate():
     if config.MODEL_TYPE == "causal_lm":
+        _generate_preds_causal_lm()
         all_inputs, all_preds, all_refs, peak_mem = _generate_preds_causal_lm()
     elif config.MODEL_TYPE == "seq2seq":
         all_inputs, all_preds, all_refs, peak_mem = _generate_preds_seq2seq()
