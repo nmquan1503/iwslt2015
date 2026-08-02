@@ -51,6 +51,8 @@ def _generate_preds_causal_lm():
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
 
+    start_time = time.perf_counter()
+
     with torch.inference_mode():
         for batch in tqdm(test_loader, desc="Test"):
             input_ids = batch["input_ids"].to(device)
@@ -72,6 +74,13 @@ def _generate_preds_causal_lm():
                 all_inputs.append(tokenizer.decode(inp.tolist()))
                 all_preds.append(tokenizer.decode(pred))
                 all_refs.append(tokenizer.decode(tgt))
+
+    torch.cuda.synchronize()
+    total_time = time.perf_counter() - start_time
+    peak_mem = torch.cuda.max_memory_allocated()
+
+    print(f"Total inference time: {total_time:.3f} s")
+    print(f"Peak memory allocated: {peak_mem / 1024**2:.2f} MB")
 
     return (
         all_inputs,
