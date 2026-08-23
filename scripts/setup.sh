@@ -7,7 +7,7 @@ pip uninstall -y \
     tokenizers \
     sentencepiece \
     entmax
-pip install unbabel-comet
+pip install unbabel-comet bert-score
 
 git clone https://github.com/nmquan1503/selective-attention.git -b dev -q
 cd selective-attention
