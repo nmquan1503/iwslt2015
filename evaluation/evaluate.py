@@ -11,7 +11,7 @@ from attention.models import (
 )
 from attention.inference import GenerationConfig
 import config
-from evaluation.metrics import compute_bleu, compute_rouge, compute_comet
+from evaluation.metrics import compute_bleu, compute_rouge, compute_comet, compute_bert
 
 def _generate_preds_causal_lm():
     tokenizer = Tokenizer()
@@ -169,7 +169,8 @@ def _write_preds(all_inputs, all_preds, all_refs):
 
 def evaluate():
     if config.MODEL_TYPE == "causal_lm":
-        _generate_preds_causal_lm()
+        if config.WARMUP_FULL:
+            _generate_preds_causal_lm()
         all_inputs, all_preds, all_refs, peak_mem = _generate_preds_causal_lm()
     elif config.MODEL_TYPE == "seq2seq":
         all_inputs, all_preds, all_refs, peak_mem = _generate_preds_seq2seq()
@@ -181,8 +182,27 @@ def evaluate():
     metrics = {
         **compute_bleu(all_preds, all_refs),
         **compute_rouge(all_preds, all_refs),
-        **compute_comet(all_inputs, all_preds, all_refs, config.COMET_BATCH_SIZE, config.COMET_NUM_GPUS)
     }
+
+    if config.COMPUTE_COMET:
+        metrics.update(
+            compute_comet(
+                all_inputs,
+                all_preds,
+                all_refs,
+                config.COMET_BATCH_SIZE,
+                config.COMET_NUM_GPUS,
+            )
+        )
+
+    if config.COMPUTE_BERT:
+        metrics.update(
+            compute_bert(
+                all_preds,
+                all_refs,
+                config.BERT_BATCH_SIZE,
+            )
+        )
 
     print("\n===== QUALITY =====")
     for k, v in metrics.items():

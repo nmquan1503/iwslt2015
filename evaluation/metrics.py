@@ -1,6 +1,7 @@
 import sacrebleu
 from rouge_score import rouge_scorer
 from comet import download_model, load_from_checkpoint
+from bert_score import score
 
 def compute_bleu(preds, refs):
     return {
@@ -51,4 +52,17 @@ def compute_comet(sources, preds, refs, batch_size=32, gpus=1):
 
     return {
         "comet": result.system_score
+    }
+
+def compute_bert(preds, refs, batch_size=8):
+    _, _, f1 = score(
+        preds,
+        refs,
+        model_type="xlm-roberta-large",
+        batch_size=batch_size,
+        device="cuda",
+    )
+
+    return {
+        "bert_score": f1.mean().item()
     }
