@@ -23,6 +23,8 @@ BEST_MODEL_PATH = "best_model.pt"
 LEARNING_RATE = 3e-4
 DROPOUT_RATE = 0.25
 RESUME_TRAINING = False
+MAX_LEN = 500
+OVERFLOW_MODE = "skip"
 
 # Model Config
 MODEL_TYPE = "seq2seq"

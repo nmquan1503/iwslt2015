@@ -7,9 +7,7 @@ from data.tokenizer import Tokenizer
 import config
 
 class CausalLMDataset(Dataset):
-    MAX_LEN = 500
-
-    def __init__(self, src_path: str, tgt_path: str, tokenizer: Tokenizer):
+    def __init__(self, src_path: str, tgt_path: str, tokenizer: Tokenizer, mode="train"):
         self.tokenizer = tokenizer
         self.src_ids = []
         self.tgt_ids = []
@@ -29,9 +27,17 @@ class CausalLMDataset(Dataset):
             src_ids = enc_src(src_text)
             tgt_ids = enc_tgt(tgt_text)
 
-            if len(src_ids) + len(tgt_ids) - 1 <= self.MAX_LEN:
+            if mode != "train":
                 self.src_ids.append(src_ids)
                 self.tgt_ids.append(tgt_ids)
+                continue
+
+            if len(src_ids) + len(tgt_ids) - 1 <= config.MAX_LEN:
+                self.src_ids.append(src_ids)
+                self.tgt_ids.append(tgt_ids)
+                continue
+
+            if config.OVERFLOW_MODE == "skip":
                 continue
 
             src_sents = self._split_sentences(src_text)
@@ -46,7 +52,7 @@ class CausalLMDataset(Dataset):
                 trial_src = cur_src + [s_src]
                 trial_tgt = cur_tgt + [s_tgt]
 
-                if len(enc_src(" ".join(trial_src))) + len(enc_tgt(" ".join(trial_tgt))) - 1 <= self.MAX_LEN:
+                if len(enc_src(" ".join(trial_src))) + len(enc_tgt(" ".join(trial_tgt))) - 1 <= config.MAX_LEN:
                     cur_src, cur_tgt = trial_src, trial_tgt
                     continue
 
@@ -60,7 +66,7 @@ class CausalLMDataset(Dataset):
                 src_ids = enc_src(" ".join(cur_src))
                 tgt_ids = enc_tgt(" ".join(cur_tgt))
 
-                if len(src_ids) + len(tgt_ids) - 1 <= self.MAX_LEN:
+                if len(src_ids) + len(tgt_ids) - 1 <= config.MAX_LEN:
                     self.src_ids.append(src_ids)
                     self.tgt_ids.append(tgt_ids)
 
@@ -92,9 +98,7 @@ class CausalLMDataset(Dataset):
 
 
 class Seq2SeqDataset(Dataset):
-    MAX_LEN = 250
-
-    def __init__(self, src_path: str, tgt_path: str, tokenizer: Tokenizer):
+    def __init__(self, src_path: str, tgt_path: str, tokenizer: Tokenizer, mode="train"):
         self.tokenizer = tokenizer
         self.src_ids = []
         self.tgt_ids = []
@@ -114,9 +118,17 @@ class Seq2SeqDataset(Dataset):
             src_ids = enc_src(src_text)
             tgt_ids = enc_tgt(tgt_text)
 
-            if max(len(src_ids), len(tgt_ids)) <= self.MAX_LEN:
+            if mode != "train":
                 self.src_ids.append(src_ids)
                 self.tgt_ids.append(tgt_ids)
+                continue
+
+            if max(len(src_ids), len(tgt_ids)) <= config.MAX_LEN:
+                self.src_ids.append(src_ids)
+                self.tgt_ids.append(tgt_ids)
+                continue
+
+            if config.OVERFLOW_MODE == "skip":
                 continue
 
             src_sents = self._split_sentences(src_text)
@@ -134,7 +146,7 @@ class Seq2SeqDataset(Dataset):
                 if max(
                     len(enc_src(" ".join(trial_src))),
                     len(enc_tgt(" ".join(trial_tgt))),
-                ) <= self.MAX_LEN:
+                ) <= config.MAX_LEN:
                     cur_src, cur_tgt = trial_src, trial_tgt
                     continue
 
@@ -148,7 +160,7 @@ class Seq2SeqDataset(Dataset):
                 src_ids = enc_src(" ".join(cur_src))
                 tgt_ids = enc_tgt(" ".join(cur_tgt))
 
-                if max(len(src_ids), len(tgt_ids)) <= self.MAX_LEN:
+                if max(len(src_ids), len(tgt_ids)) <= config.MAX_LEN:
                     self.src_ids.append(src_ids)
                     self.tgt_ids.append(tgt_ids)
 
@@ -172,10 +184,10 @@ class Seq2SeqDataset(Dataset):
             "target_ids": torch.tensor(tgt[1:], dtype=torch.long),
         }
 
-def auto_dataset(src_path, tgt_path, tokenizer):
+def auto_dataset(src_path, tgt_path, tokenizer, mode="train"):
     if config.MODEL_TYPE == "seq2seq":
-        return Seq2SeqDataset(src_path, tgt_path, tokenizer)
+        return Seq2SeqDataset(src_path, tgt_path, tokenizer, mode)
     elif config.MODEL_TYPE == "causal_lm":
-        return CausalLMDataset(src_path, tgt_path, tokenizer)
+        return CausalLMDataset(src_path, tgt_path, tokenizer, mode)
     else:
         raise ValueError(f"Don't support {config.MODEL_TYPE}.")
