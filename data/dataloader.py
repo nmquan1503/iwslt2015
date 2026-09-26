@@ -47,7 +47,7 @@ def build_dataloader(tokenizer: Tokenizer, mode="train"):
     else:
         src_path = config.TEST_SRC_PATH
         tgt_path = config.TEST_TGT_PATH
-    dataset = auto_dataset(src_path, tgt_path, tokenizer)
+    dataset = auto_dataset(src_path, tgt_path, tokenizer, mode)
 
     generator = torch.Generator()
     if config.SEED is not None:
