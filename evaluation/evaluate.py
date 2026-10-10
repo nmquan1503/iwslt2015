@@ -233,7 +233,7 @@ def _generate_preds_seq2seq():
                     global_cross_attn_mass[layer_idx] += layer_cross_stats["attn_mass"]
                     global_cross_attn_count[layer_idx] += layer_cross_stats["attn_count"]
                     global_cross_gate_freq[layer_idx] += layer_cross_stats["gate_freq"]
-                token_kept_ratio = stats_dict["overall"]["token_kept_ratio"]
+                token_kept_ratio = stats_dict["overall"]["kept_ratio"]
                 total_kept_ratio_sum += token_kept_ratio
                 total_batches += 1
             else:
